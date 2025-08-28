@@ -71,8 +71,8 @@ viz = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/fluoropy"
-"Bug Tracker" = "https://github.com/yourusername/fluoropy/issues"
+Homepage = "https://github.com/aztaylor/fluoropy"
+"Bug Tracker" = "https://github.com/aztaylor/fluoropy/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
