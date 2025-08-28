@@ -105,7 +105,7 @@ class Plate:
     def __repr__(self) -> str:
         return f"Plate({self.format}-well, {len(self.wells)} wells)"
 
-    class Plate96:
+class Plate96:
     """
     Represents a 96-well plate with subscriptable well IDs
 
