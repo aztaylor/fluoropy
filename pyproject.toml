@@ -6,15 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "fluoropy"
 version = "0.1.0"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "Aleczander Taylor", email = "aztaylor76@fastmail.com"},
 ]
-description = "A Python package for fluorine-related calculations and utilities"
+description = "A Python package for fluorescence assay analysis and biological data processing"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -22,11 +23,30 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 dependencies = [
-    # Add your package dependencies here
-    # "numpy>=1.20.0",
-    # "requests>=2.25.0",
+    # Core scientific computing for biological data
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "scipy>=1.7.0",
+
+    # Image processing for fluorescence microscopy
+    # "scikit-image>=0.19.0",
+    # "opencv-python>=4.5.0",
+    # "pillow>=8.0.0",
+
+    # Biological data analysis
+    # "biopython>=1.79",
+    # "scanpy>=1.8.0",        # Single-cell analysis
+    # "anndata>=0.8.0",       # Annotated data
+
+    # Plate reader and assay analysis
+    # "openpyxl>=3.0.0",      # Excel file handling
+    # "xlrd>=2.0.0",          # Excel reading
+
+    # Add your package dependencies here as you develop
 ]
 
 [project.optional-dependencies]
@@ -36,6 +56,18 @@ dev = [
     "black",
     "isort",
     "flake8",
+    "mypy",
+    "pre-commit",
+]
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme",
+    "myst-parser",
+]
+viz = [
+    "matplotlib>=3.5.0",
+    "plotly>=5.0.0",
+    "seaborn>=0.11.0",
 ]
 
 [project.urls]
