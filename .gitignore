@@ -137,3 +137,6 @@ Thumbs.db
 # Local configuration files
 .env.local
 .env.*.local
+
+# Development principle examples
+examples/
