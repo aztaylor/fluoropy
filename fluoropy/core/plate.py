@@ -1,4 +1,13 @@
 
+"""
+Core plate and well classes for fluorescence assay data management.
+"""
+
+from typing import Dict, List, Optional, Any, Union
+import numpy as np
+import pandas as pd
+from .well import Well
+
 class Plate:
     """Represents a microplate for fluorescence assays."""
 
@@ -97,6 +106,103 @@ class Plate:
                 matrix[row_idx, col_idx] = well.concentration
 
         return matrix
+
+    # ======================================================================
+    # CONVENIENCE METHODS - Delegate to analysis functions
+    # ======================================================================
+
+    def calculate_cv(self, well_list: List[str], timepoint: Optional[int] = None) -> float:
+        """
+        Calculate coefficient of variation for wells.
+
+        Convenience method that delegates to analysis.statistics.calculate_cv
+
+        Args:
+            well_list: List of well positions (e.g., ['A1', 'A2', 'A3'])
+            timepoint: Specific timepoint for kinetic data (None for endpoint)
+
+        Returns:
+            Coefficient of variation as percentage
+
+        Example:
+            >>> cv = plate.calculate_cv(['A1', 'A2', 'A3'])
+            >>> print(f"CV: {cv:.1f}%")
+        """
+        from ..analysis.statistics import calculate_cv as _calculate_cv
+        return _calculate_cv(self, well_list, timepoint)
+
+    def calculate_z_factor(self, positive_controls: List[str],
+                          negative_controls: List[str],
+                          timepoint: Optional[int] = None) -> float:
+        """
+        Calculate Z-factor for assay quality assessment.
+
+        Convenience method that delegates to analysis.statistics.calculate_z_factor
+
+        Args:
+            positive_controls: List of positive control well positions
+            negative_controls: List of negative control well positions
+            timepoint: Specific timepoint for kinetic data
+
+        Returns:
+            Z-factor value (>0.5 = excellent, 0-0.5 = acceptable, <0 = poor)
+
+        Example:
+            >>> z_factor = plate.calculate_z_factor(['A1', 'A2'], ['B1', 'B2'])
+            >>> print(f"Z-factor: {z_factor:.3f}")
+        """
+        from ..analysis.statistics import calculate_z_factor as _calculate_z_factor
+        return _calculate_z_factor(self, positive_controls, negative_controls, timepoint)
+
+    def normalize_to_controls(self, test_wells: List[str],
+                             positive_controls: List[str],
+                             negative_controls: List[str],
+                             timepoint: Optional[int] = None) -> Dict[str, float]:
+        """
+        Normalize test wells to control wells using percent control formula.
+
+        Convenience method that delegates to analysis.normalization.normalize_to_controls
+
+        Args:
+            test_wells: Wells to normalize
+            positive_controls: Positive control wells (100% signal)
+            negative_controls: Negative control wells (0% signal)
+            timepoint: Specific timepoint for kinetic data
+
+        Returns:
+            Dict mapping well positions to normalized values
+
+        Example:
+            >>> normalized = plate.normalize_to_controls(['C1', 'C2'], ['A1', 'A2'], ['B1', 'B2'])
+            >>> for well, norm_val in normalized.items():
+            ...     print(f"Well {well}: {norm_val:.1f}% of control")
+        """
+        from ..analysis.normalization import normalize_to_controls as _normalize_to_controls
+        return _normalize_to_controls(self, test_wells, positive_controls, negative_controls, timepoint)
+
+    def percent_inhibition(self, test_wells: List[str],
+                          control_wells: List[str],
+                          timepoint: Optional[int] = None) -> Dict[str, float]:
+        """
+        Calculate percent inhibition relative to control wells.
+
+        Convenience method that delegates to analysis.normalization.percent_inhibition
+
+        Args:
+            test_wells: Wells with test compounds
+            control_wells: Control wells (no inhibition)
+            timepoint: Specific timepoint for kinetic data
+
+        Returns:
+            Dict mapping well positions to percent inhibition values
+
+        Example:
+            >>> inhibition = plate.percent_inhibition(['C1', 'C2'], ['A1', 'A2'])
+            >>> for well, inhib_val in inhibition.items():
+            ...     print(f"Well {well}: {inhib_val:.1f}% inhibition")
+        """
+        from ..analysis.normalization import percent_inhibition as _percent_inhibition
+        return _percent_inhibition(self, test_wells, control_wells, timepoint)
 
     def __len__(self) -> int:
         """Return number of wells with data."""

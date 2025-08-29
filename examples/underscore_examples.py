@@ -39,14 +39,14 @@ class _PrivateClass:
 
 def demonstrate_all_behavior():
     """Show how __all__ affects imports."""
-    
+
     # This is what __all__ controls:
     print("Items in __all__:", __all__)
-    
+
     # All items in the module (including private ones):
     all_items = [name for name in globals() if not name.startswith('__')]
     print("All items in module:", all_items)
-    
+
     # What gets imported with "from module import *":
     star_import_items = [name for name in globals() if name in __all__]
     print("Available with 'import *':", star_import_items)

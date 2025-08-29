@@ -35,16 +35,16 @@ def _format_well_position(row, col):
 # Private class for internal use
 class _InternalCache:
     """Internal caching mechanism - not for public use."""
-    
+
     def __init__(self):
         self._cache = {}
-    
+
     def get(self, key):
         return self._cache.get(key)
-    
+
     def set(self, key, value):
         self._cache[key] = value
-    
+
     def clear(self):
         self._cache.clear()
 
@@ -57,21 +57,21 @@ _global_cache = _InternalCache()
 
 class WellValidator:
     """Public class for validating well data."""
-    
+
     def __init__(self):
         self._cache = _InternalCache()  # Uses private class
-    
+
     def validate_well_data(self, position, fluorescence):
         """
         Public method to validate well data.
-        
+
         Parameters
         ----------
         position : str
             Well position (e.g., 'A1')
         fluorescence : float
             Fluorescence value
-            
+
         Returns
         -------
         bool
@@ -79,13 +79,13 @@ class WellValidator:
         """
         # Use private validation functions
         _validate_fluorescence_value(fluorescence)
-        
+
         # Cache the validation result
         cache_key = f"{position}:{fluorescence}"
         self._cache.set(cache_key, True)
-        
+
         return True
-    
+
     def get_validation_stats(self):
         """Get statistics about validations performed."""
         # This method could use private statistical functions
@@ -99,12 +99,12 @@ class WellValidator:
 def create_well_layout(plate_format):
     """
     Public function to create well layout.
-    
+
     Parameters
     ----------
     plate_format : str
         Plate format ("96", "384", or "1536")
-        
+
     Returns
     -------
     list
@@ -112,7 +112,7 @@ def create_well_layout(plate_format):
     """
     if plate_format not in _SUPPORTED_FORMATS:  # Uses private constant
         raise ValueError(f"Unsupported format. Use: {_SUPPORTED_FORMATS}")
-    
+
     # Use private helper function
     if plate_format == "96":
         rows, cols = 8, 12
@@ -120,12 +120,12 @@ def create_well_layout(plate_format):
         rows, cols = 16, 24
     else:  # 1536
         rows, cols = 32, 48
-    
+
     positions = []
     for row in range(rows):
         for col in range(cols):
             positions.append(_format_well_position(row, col))  # Private function
-    
+
     return positions
 
 
@@ -141,7 +141,7 @@ __all__ = [
 
 # Notice what's NOT in __all__:
 # - _validate_fluorescence_value
-# - _calculate_z_score  
+# - _calculate_z_score
 # - _format_well_position
 # - _InternalCache
 # - _global_cache
@@ -152,35 +152,35 @@ __all__ = [
 
 def demonstrate_module_privacy():
     """Show how module-level privacy works."""
-    
+
     print("=== PUBLIC API USAGE ===")
-    
+
     # Use public classes and functions
     validator = WellValidator()
     is_valid = validator.validate_well_data("A1", 1000.0)
     print(f"Validation result: {is_valid}")
-    
+
     stats = validator.get_validation_stats()
     print(f"Validation stats: {stats}")
-    
+
     layout = create_well_layout("96")
     print(f"96-well layout: {len(layout)} positions")
     print(f"First few positions: {layout[:5]}")
-    
+
     print("\n=== WHAT'S HIDDEN ===")
-    
+
     # These work from within the module but shouldn't be used externally:
     print(f"Private constant accessible here: {_DEFAULT_BACKGROUND}")
     print(f"Private function accessible here: {_format_well_position(0, 0)}")
-    
+
     # Show what's available for import
     print(f"\nPublic API (__all__): {__all__}")
-    
+
     # Show all module contents (including private)
     all_names = [name for name in globals() if not name.startswith('__')]
     public_names = [name for name in all_names if not name.startswith('_')]
     private_names = [name for name in all_names if name.startswith('_')]
-    
+
     print(f"Public names: {public_names}")
     print(f"Private names: {private_names}")
 

@@ -12,6 +12,12 @@ from .core import Plate, Well, Fluorophore, Assay, PlateSet, combine_plates
 from .core.fluorophore import fluorophore_db
 from .core.assay import EndpointAssay
 
+# Import utility modules (users can access as fluoropy.utils.*)
+from . import utils
+
+# Import analysis modules (users can access as fluoropy.analysis.*)
+from . import analysis
+
 # Make key classes/functions available at package level
 __all__ = [
     "Plate",
@@ -22,4 +28,6 @@ __all__ = [
     "EndpointAssay",
     "PlateSet",
     "combine_plates",
+    "utils",
+    "analysis",
 ]
