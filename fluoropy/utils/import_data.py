@@ -5,7 +5,7 @@ Gen5 txt output format.
 - Provides functions for data validation and preprocessing.
 """
 
-def organize_gen5_data(data_file:str, n_rows:int, n_columns:list, total_run_time:float, sampling_rate:float, debug = False)->dict:
+def _import_results(data_file:str, n_rows:int, n_columns:list, total_run_time:float, sampling_rate:float, debug = False)->dict:
     '''
     Creates a 3D array where the first dimension is represents the plate rows, the second represents the plate columns, and the third contains the timeseries data.
     This is meant to be used with txt files exported for Biotek's Gen5 software with the following output parameters:
