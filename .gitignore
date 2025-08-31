@@ -140,3 +140,6 @@ Thumbs.db
 
 # Development principle examples
 examples/
+
+# Experiments
+p2x14_dCasRx_Titration/
