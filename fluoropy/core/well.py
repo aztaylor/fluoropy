@@ -40,6 +40,8 @@ class Well:
         self.time_series: Dict[str, np.ndarray] = {}  # Different measurements over time
         self.time_points: Optional[np.ndarray] = None
         self.metadata: Dict[str, Any] = {}
+        self.medium: Optional[str] = None
+        self.modifications: Optional[list] = None
 
         # Enhanced data storage
         self.replicate_data: Dict[str, Dict[str, np.ndarray]] = {}  # Stores replicate statistics {measurement_type: {'mean': array, 'std': array, 'sem': array, 'n': int}}
@@ -55,7 +57,9 @@ class Well:
         excluded_str = " [EXCLUDED]" if self.exclude else ""
         return f"Well({self.well_id}, sample={self.sample_type}, conc={self.concentration}){excluded_str}"
 
-    def set_sample_info(self, sample_type: str, concentration: Optional[float] = None,
+    def set_sample_info(self, sample_type: str, medium: Optional[str] = None,
+                        modifications: Optional[list] = None,
+                       concentration: Optional[float] = None,
                        is_blank: bool = False, is_control: bool = False):
         """Set sample information for the well"""
         self.sample_type = sample_type
