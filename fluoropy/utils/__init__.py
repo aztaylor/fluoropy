@@ -8,8 +8,12 @@ the fluoropy package but don't belong to any specific core functionality.
 from .conversions import *
 from .validation import *
 from .helpers import *
+from .import_data import _import_results
 
 __all__ = [
+    # Import/export utilities
+    "_import_results",
+
     # Conversion utilities
     "convert_units",
     "normalize_fluorescence",

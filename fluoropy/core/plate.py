@@ -668,7 +668,7 @@ class Plate:
         ax.set_xlabel('Time')
         ax.set_ylabel(measurement_type)
         ax.set_title(f'{measurement_type} Time Curves')
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=4)
         plt.tight_layout()
         return fig, ax
 
