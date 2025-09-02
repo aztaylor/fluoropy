@@ -2,7 +2,7 @@
 Plate and Well classes for managing fluorescence assay data.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 import numpy as np
 import pandas as pd
 class Well:
