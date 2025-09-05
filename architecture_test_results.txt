@@ -1,0 +1,4 @@
+✅ New fluoropy architecture working correctly!
+Sample shape: (5, 2)
+Concentrations: [ 5. 10.]
+Data format: (n_timepoints, n_concentrations) numpy arrays
