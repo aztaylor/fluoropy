@@ -296,16 +296,50 @@ class SampleFrame:
         ]
 
         if self.samples:
+            # Get information from actual time_series data
             sample = next(iter(self.samples.values()))
             n_measurements = len(sample.time_series)
-            n_timepoints = len(sample.time) if sample.time is not None else 0
-            n_concentrations = len(sample.concentrations) if sample.concentrations is not None else 0
+
+            # Get time points and concentrations from actual time_series data
+            if sample.time_series and n_measurements > 0:
+                # Get the first measurement type to check dimensions
+                first_measurement = next(iter(sample.time_series.values()))
+                if hasattr(first_measurement, 'shape') and len(first_measurement.shape) == 2:
+                    n_timepoints, n_concentrations = first_measurement.shape
+                elif hasattr(first_measurement, '__len__'):
+                    n_timepoints = len(first_measurement)
+                    n_concentrations = 1
+                else:
+                    n_timepoints = 0
+                    n_concentrations = 0
+            else:
+                # Statistics haven't been calculated yet - get info from wells
+                n_timepoints = 0
+                n_concentrations = 0
+                if sample.wells:
+                    # Get measurement types from wells
+                    measurement_types = set()
+                    concentrations = set()
+                    for well in sample.wells:
+                        if hasattr(well, 'time_series'):
+                            measurement_types.update(well.time_series.keys())
+                        if hasattr(well, 'concentration') and well.concentration is not None:
+                            concentrations.add(well.concentration)
+                        if hasattr(well, 'time_points') and well.time_points is not None:
+                            n_timepoints = max(n_timepoints, len(well.time_points))
+
+                    n_measurements = len(measurement_types)
+                    n_concentrations = len(concentrations)
 
             summary_lines.extend([
                 f"  Measurements per sample: {n_measurements}",
                 f"  Time points: {n_timepoints}",
                 f"  Concentrations: {n_concentrations}",
             ])
+
+            # Add a note if statistics haven't been calculated
+            if not sample.time_series:
+                summary_lines.append("  Note: Statistics not yet calculated. Call calculate_all_statistics() first.")
 
         return "\\n".join(summary_lines)
 
