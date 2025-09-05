@@ -61,9 +61,9 @@ class Sample:
 
         # Processed data structures
         self.blanked_data: Dict[str, np.ndarray] = {}      # Blank-subtracted
-        self.blanked_data_err: Dict[str, np.ndarray] = {}  # Error for blanked data
+        self.blanked_data_error: Dict[str, np.ndarray] = {}  # Error for blanked data
         self.normalized_data: Dict[str, np.ndarray] = {}   # Normalized
-        self.normalized_data_err: Dict[str, np.ndarray] = {}  # Error for normalized data
+        self.normalized_data_error: Dict[str, np.ndarray] = {}  # Error for normalized data
 
         # Metadata
         self.n_replicates: Dict[str, int] = {}        # Number of replicates per concentration
@@ -269,7 +269,7 @@ class Sample:
                     blank_data = np.broadcast_to(blank_data, sample_data.shape)
 
                 self.blanked_data[measurement_type] = sample_data - blank_data
-                self.blanked_data_err[measurement_type] = np.sqrt(
+                self.blanked_data_error[measurement_type] = np.sqrt(
                     self.error[measurement_type]**2 + blank_sample.error[measurement_type]**2
                 )
 
@@ -293,7 +293,7 @@ class Sample:
             return
 
         od_data = self.blanked_data[od_measurement]
-        od_err = self.blanked_data_err[od_measurement]
+        od_err = self.blanked_data_error[od_measurement]
 
         if measurement_types is None:
             measurement_types = list(self.blanked_data.keys())
@@ -301,9 +301,9 @@ class Sample:
         for measurement_type in measurement_types:
             if measurement_type in self.blanked_data:
                 measurement_data = self.blanked_data[measurement_type]
-                measurement_err = self.blanked_data_err[measurement_type]
+                measurement_err = self.blanked_data_error[measurement_type]
                 self.normalized_data[measurement_type] = measurement_data / (od_data + offset)
-                self.normalized_data_err[measurement_type] = measurement_data / (od_data + offset) * np.sqrt(
+                self.normalized_data_error[measurement_type] = measurement_data / (od_data + offset) * np.sqrt(
                     (measurement_err / measurement_data)**2 +
                     (od_err / (od_data + offset))**2
                 )
