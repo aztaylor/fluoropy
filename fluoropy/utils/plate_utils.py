@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from copy import deepcopy
 
-from ..core.plate_new import Plate
+from ..core.plate import Plate
 from ..core.well import Well
 
 
