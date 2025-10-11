@@ -1,0 +1,29 @@
+/Users/alec/miniconda3/envs/titration/lib/python3.13/site-packages/numpy/_core/_methods.py:222: RuntimeWarning: Degrees of freedom <= 0 for slice
+  ret = _var(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+/Users/alec/miniconda3/envs/titration/lib/python3.13/site-packages/numpy/_core/_methods.py:211: RuntimeWarning: invalid value encountered in divide
+  ret = um.true_divide(
+Testing the concentration reordering issue...
+
+Original wells (with replicates):
+  Well 0: A1, conc=0.1, excluded=False
+  Well 1: A2, conc=0.1, excluded=False
+  Well 2: A3, conc=0.2, excluded=False
+  Well 3: A4, conc=0.2, excluded=False
+  Well 4: A5, conc=0.3, excluded=False
+  Well 5: A6, conc=0.3, excluded=False
+
+Before exclusion:
+  Concentrations: [0.1 0.2 0.3]
+  Expected: [0.1, 0.2, 0.3] (first occurrence order)
+  Array shape: (3, 3)
+  First timepoint data: [10.5 12.5 14.5]
+
+--- Excluding FIRST well of conc=0.1 (A1) ---
+Note: A2 still has conc=0.1, so 0.1 should remain but might move position!
+
+After exclusion:
+  Concentrations: [0.1 0.2 0.3]
+  Expected: [0.1, 0.2, 0.3] (same order)
+  Array shape: (3, 3)
+  First timepoint data: [11.  12.5 14.5]
+  ✅ Concentration order preserved

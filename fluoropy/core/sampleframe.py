@@ -134,7 +134,10 @@ class SampleFrame:
         # Create Sample objects for each sample type
         for sample_type, wells in sample_groups.items():
             if wells:  # Only create if we have wells
-                sample = Sample(sample_type, wells)
+                # Sort wells by their plate position to maintain consistent ordering
+                # This ensures concentrations stay in the original plate order
+                wells_sorted = sorted(wells, key=lambda w: (w.row, w.column))
+                sample = Sample(sample_type, wells_sorted)
                 self.samples[sample_type] = sample
 
     def _get_wells_from_plate(self, plate: Plate) -> List[Well]:

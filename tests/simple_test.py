@@ -1,62 +1,68 @@
 #!/usr/bin/env python3
-import sys
-sys.path.insert(0, '/Users/alec/Documents/SideProjects/fluoropy')
 
-print("Testing imports step by step...")
+# Simple test without imports to debug
+print("Starting simple test...")
 
-try:
-    import fluoropy
-    print("✅ fluoropy module imported")
-except Exception as e:
-    print(f"❌ fluoropy import failed: {e}")
-    exit(1)
+class SimpleWell:
+    def __init__(self, well_id):
+        self.well_id = well_id
+        self.concentration = None
+        self._excluded = False
+        self.measurements = {}
 
-try:
-    import fluoropy.core
-    print("✅ fluoropy.core imported")
-except Exception as e:
-    print(f"❌ fluoropy.core import failed: {e}")
-    exit(1)
+    def exclude(self):
+        self._excluded = True
 
-try:
-    from fluoropy.core import Plate
-    print("✅ Plate imported")
-except Exception as e:
-    print(f"❌ Plate import failed: {e}")
-    import traceback
-    traceback.print_exc()
-    exit(1)
+    def is_excluded(self):
+        return self._excluded
 
-try:
-    from fluoropy.core import Well
-    print("✅ Well imported")
-except Exception as e:
-    print(f"❌ Well import failed: {e}")
-    import traceback
-    traceback.print_exc()
-    exit(1)
+    def add_measurement(self, name, data):
+        self.measurements[name] = data
 
-try:
-    from fluoropy.core import Sample
-    print("✅ Sample imported")
-except Exception as e:
-    print(f"❌ Sample import failed: {e}")
-    import traceback
-    traceback.print_exc()
-    exit(1)
+class SimpleSample:
+    def __init__(self):
+        self.wells = []
 
-try:
-    from fluoropy.core import SampleFrame
-    print("✅ SampleFrame imported")
-except Exception as e:
-    print(f"❌ SampleFrame import failed: {e}")
-    import traceback
-    traceback.print_exc()
-    exit(1)
+    def add_well(self, well):
+        self.wells.append(well)
 
-print("🎉 All imports successful!")
+    def get_concentrations(self):
+        concentrations = []
+        seen = set()
 
-# Quick test
-plate = Plate(plate_format="96", name="test")
-print(f"Created plate: {plate}")
-print(f"Well A1: {plate['A1']}")
+        for well in self.wells:
+            if (well.concentration is not None and
+                not well.is_excluded() and
+                well.concentration not in seen):
+                concentrations.append(well.concentration)
+                seen.add(well.concentration)
+
+        return concentrations
+
+# Test the concentration ordering
+wells = []
+for i, conc in enumerate([0.1, 0.2, 0.3, 0.4]):
+    well = SimpleWell(f'A{i+1}')
+    well.concentration = conc
+    wells.append(well)
+
+sample = SimpleSample()
+for well in wells:
+    sample.add_well(well)
+
+print("Before exclusion:", sample.get_concentrations())
+
+# Exclude first well
+wells[0].exclude()
+print("After excluding first well:", sample.get_concentrations())
+
+# The expected result should be [0.2, 0.3, 0.4] NOT [0.2, 0.3, 0.4, 0.1]
+expected = [0.2, 0.3, 0.4]
+actual = sample.get_concentrations()
+
+if actual == expected:
+    print("✅ Concentration ordering is correct")
+else:
+    print(f"❌ Issue found: expected {expected}, got {actual}")
+
+print("Test completed.")

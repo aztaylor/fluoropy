@@ -588,3 +588,242 @@ class Plate:
         """Get all non-excluded wells"""
         return [well for well in self.wells.values()
                 if not (hasattr(well, 'exclude') and well.exclude)]
+
+    # ======================================================================
+    # VISUALIZATION METHODS
+    # ======================================================================
+
+    def plot_timeseries_grid(self, measurement_type: str, figsize: tuple = (15, 10),
+                           title: Optional[str] = None, show_sample_info: bool = True):
+        """
+        Plot raw timeseries data for each well in an 8x12 grid matching plate layout.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to plot (e.g., 'OD600', 'GFP')
+        figsize : tuple, default (15, 10)
+            Figure size in inches (width, height)
+        title : str, optional
+            Overall figure title. If None, uses measurement type and plate name.
+        show_sample_info : bool, default True
+            Whether to show sample type and concentration in subplot titles
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The created figure object
+        """
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            print("matplotlib is required for plotting. Install with: pip install matplotlib")
+            return None
+
+        # Create figure and subplots in 8x12 grid
+        fig, axes = plt.subplots(8, 12, figsize=figsize, sharex=True, sharey=True)
+        fig.suptitle(title or f"{measurement_type} Timeseries - {self.name or 'Plate'}",
+                    fontsize=14, fontweight='bold')
+
+        # Plot data for each well position
+        for row in range(8):
+            for col in range(12):
+                ax = axes[row, col]
+                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well = self.wells.get(well_id)
+
+                if well and hasattr(well, 'time_series') and measurement_type in well.time_series:
+                    # Get time series data
+                    y_data = well.time_series[measurement_type]
+                    x_data = well.time_points if hasattr(well, 'time_points') and well.time_points is not None else range(len(y_data))
+
+                    # Plot the data
+                    ax.plot(x_data, y_data, 'b-', linewidth=1.5, alpha=0.8)
+
+                    # Set background color based on sample type
+                    if hasattr(well, 'is_blank') and well.is_blank:
+                        ax.set_facecolor('#f0f0f0')  # Light gray for blanks
+                    elif hasattr(well, 'is_control') and well.is_control:
+                        ax.set_facecolor('#fff5f5')  # Light red for controls
+                    else:
+                        ax.set_facecolor('white')
+
+                    # Create subplot title
+                    if show_sample_info and hasattr(well, 'sample_type'):
+                        sample_info = well.sample_type or "Unknown"
+                        if hasattr(well, 'concentration') and well.concentration is not None:
+                            sample_info += f"\n{well.concentration}"
+                        ax.set_title(f"{well_id}\n{sample_info}", fontsize=8, pad=2)
+                    else:
+                        ax.set_title(well_id, fontsize=8, pad=2)
+
+                else:
+                    # Empty well or no data
+                    ax.set_facecolor('#e0e0e0')  # Gray for empty wells
+                    ax.set_title(well_id, fontsize=8, pad=2)
+                    ax.text(0.5, 0.5, 'No Data', ha='center', va='center',
+                           transform=ax.transAxes, fontsize=8, alpha=0.6)
+
+                # Format subplot
+                ax.tick_params(labelsize=6)
+                ax.grid(True, alpha=0.3)
+
+        # Set common labels
+        fig.text(0.5, 0.02, 'Time', ha='center', fontsize=12)
+        fig.text(0.02, 0.5, measurement_type, va='center', rotation='vertical', fontsize=12)
+
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.93, bottom=0.07, left=0.05, right=0.98)
+
+        return fig
+
+    # ======================================================================
+    # STATISTICAL ANALYSIS METHODS
+    # ======================================================================
+
+    def calculate_timepoint_statistics(self, measurement_type: str, timepoint_idx: int,
+                                     sample_types: Optional[List[str]] = None,
+                                     exclude_blanks: bool = True,
+                                     exclude_controls: bool = False) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate summary statistics for each sample type and concentration at a given timepoint.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to analyze
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        sample_types : List[str], optional
+            Specific sample types to analyze. If None, analyzes all sample types.
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells from analysis
+        exclude_controls : bool, default False
+            Whether to exclude control wells from analysis
+
+        Returns
+        -------
+        Dict[str, Dict[str, float]]
+            Dictionary with 'sample_type_concentration' keys, and statistics dictionaries as values.
+            Each statistics dictionary contains: 'mean', 'std', 'sem', 'count', 'min', 'max', 'median', 'q25', 'q75', 'iqr'
+
+        Examples
+        --------
+        >>> stats = plate.calculate_timepoint_statistics('OD600', timepoint_idx=10)
+        >>> print(stats['sample_1_10.0']['mean'])  # Mean OD600 for sample_1 at 10.0 concentration
+        >>> print(stats['sample_1_5.0']['sem'])    # SEM for sample_1 at 5.0 concentration
+        """
+        from collections import defaultdict
+
+        # Group wells by (sample_type, concentration)
+        sample_conc_groups = defaultdict(list)
+
+        for well in self.wells.values():
+            # Skip excluded wells
+            if hasattr(well, 'exclude') and well.exclude:
+                continue
+
+            # Skip wells without the measurement
+            if not (hasattr(well, 'time_series') and measurement_type in well.time_series):
+                continue
+
+            # Skip wells without enough timepoints
+            time_series = well.time_series[measurement_type]
+            if len(time_series) <= timepoint_idx:
+                continue
+
+            # Apply exclusion criteria
+            if exclude_blanks and hasattr(well, 'is_blank') and well.is_blank:
+                continue
+            if exclude_controls and hasattr(well, 'is_control') and well.is_control:
+                continue
+
+            # Get sample type and concentration
+            sample_type = getattr(well, 'sample_type', 'Unknown')
+            concentration = getattr(well, 'concentration', 0.0)
+
+            # Filter by specific sample types if provided
+            if sample_types is not None and sample_type not in sample_types:
+                continue
+
+            # Create group key (sample_type, concentration)
+            group_key = f"{sample_type}_{concentration}"
+
+            # Add value to group
+            value = time_series[timepoint_idx]
+            sample_conc_groups[group_key].append(value)
+
+        # Calculate statistics for each (sample_type, concentration) group
+        statistics = {}
+
+        for group_key, values in sample_conc_groups.items():
+            if not values:
+                continue
+
+            values_array = np.array(values)
+
+            stats = {
+                'mean': np.mean(values_array),
+                'std': np.std(values_array, ddof=1) if len(values_array) > 1 else 0.0,
+                'sem': np.std(values_array, ddof=1) / np.sqrt(len(values_array)) if len(values_array) > 1 else 0.0,
+                'count': len(values_array),
+                'min': np.min(values_array),
+                'max': np.max(values_array),
+                'median': np.median(values_array)
+            }
+
+            # Add quartiles
+            stats['q25'] = np.percentile(values_array, 25)
+            stats['q75'] = np.percentile(values_array, 75)
+            stats['iqr'] = stats['q75'] - stats['q25']
+
+            statistics[group_key] = stats
+
+        return statistics
+
+    def get_timepoint_summary_table(self, measurement_type: str, timepoint_idx: int,
+                                  sample_types: Optional[List[str]] = None,
+                                  exclude_blanks: bool = True,
+                                  exclude_controls: bool = False) -> 'pd.DataFrame':
+        """
+        Get summary statistics as a formatted pandas DataFrame.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to analyze
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        sample_types : List[str], optional
+            Specific sample types to analyze
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells
+        exclude_controls : bool, default False
+            Whether to exclude control wells
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with sample types as index and statistics as columns
+        """
+        stats = self.calculate_timepoint_statistics(
+            measurement_type, timepoint_idx, sample_types,
+            exclude_blanks, exclude_controls
+        )
+
+        if not stats:
+            return pd.DataFrame()
+
+        # Convert to DataFrame
+        df = pd.DataFrame.from_dict(stats, orient='index')
+
+        # Round numeric columns
+        numeric_columns = ['mean', 'std', 'sem', 'min', 'max', 'median', 'q25', 'q75', 'iqr']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = df[col].round(4)
+
+        # Sort by sample type
+        df = df.sort_index()
+
+        return df

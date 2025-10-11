@@ -7,7 +7,7 @@ Gen5 txt output format.
 
 import numpy as np
 
-def _import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float, sampling_rate:float)->dict:
+def _import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float, sampling_rate:float, read_labels = ["Read 1:600", "Read 2:480,510"])->dict:
     '''
     Creates a 3D array where the first dimension is represents the plate rows, the second represents the plate columns, and the third contains the timeseries data.
     This is meant to be used with txt files exported for Biotek's Gen5 software with the following output parameters:
@@ -30,7 +30,6 @@ def _import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:floa
         -meta_data(dict): Keys are the metadata titles and values are lists of the
     '''
     file_read = open(data_file, encoding="iso-8859-1")
-    read_labels = ["Read 1:600", "Read 2:480,510"]
 
     data = {}
     time = {}

@@ -119,24 +119,159 @@ class Sample:
         if len(self.wells) == 1:
             self._initialize_from_wells()
 
-    def get_concentrations(self) -> np.ndarray:
+    def get_concentrations(self, order: str = 'value') -> np.ndarray:
         """
         Get unique concentrations from all wells in this sample.
+
+        IMPORTANT: If time series data exists, this method always returns concentrations
+        in the same order as the time series columns to maintain data integrity,
+        regardless of the 'order' parameter.
+
+        Parameters
+        ----------
+        order : str, default 'value'
+            Concentration ordering method (only used if no time series data exists):
+            - 'value': Order by concentration value (highest to lowest) - RECOMMENDED DEFAULT
+            - 'position': Order by earliest plate position (legacy behavior)
+            - 'original': Order by original plate design positions (includes excluded wells)
 
         Returns
         -------
         np.ndarray
-            Sorted array of unique concentrations
+            Array of unique concentrations. If time series data exists, returns
+            concentrations in the same order as time series columns.
         """
-        concentrations = []
-        for well in self.wells:
-            if well.concentration is not None:
-                concentrations.append(well.concentration)
 
-        if concentrations:
-            return np.array(sorted(set(concentrations)))
-        else:
-            return np.array([0.0])  # Default concentration
+        # CRITICAL: If time series data exists, always return the canonical order
+        # that matches the time series columns to maintain data integrity
+        if (hasattr(self, '_timeseries_concentration_order') and
+            self._timeseries_concentration_order is not None and
+            hasattr(self, 'time_series') and
+            self.time_series):
+            return self._timeseries_concentration_order.copy()
+
+        # If no time series data, delegate to the custom order method
+        return self.get_concentrations_custom_order(order=order)
+
+    def get_concentrations_custom_order(self, order: str = 'position') -> np.ndarray:
+        """
+        Get unique concentrations in a specific order, ignoring time series data order.
+        Use this method when you explicitly want a different ordering than the time series.
+
+        WARNING: The returned concentrations may not match time series column indices!
+        Only use this for analysis that doesn't depend on time series data.
+
+        Parameters
+        ----------
+        order : str, default 'position'
+            Concentration ordering method:
+            - 'position': Order by earliest plate position
+            - 'value': Order by concentration value (highest to lowest)
+            - 'original': Order by original plate design positions
+
+        Returns
+        -------
+        np.ndarray
+            Array of unique concentrations in the requested order
+        """
+        if order == 'value':
+            # Value-based ordering: sort by concentration value (highest to lowest)
+            concentrations = set()
+            for well in self.wells:
+                if well.concentration is not None and not well.is_excluded():
+                    concentrations.add(well.concentration)
+
+            if concentrations:
+                return np.array(sorted(concentrations, reverse=True))
+            else:
+                return np.array([0.0])
+
+        elif order == 'original':
+            # Original plate design order: include ALL wells (ignore exclusions for positioning)
+            concentration_positions = {}
+            for well in self.wells:
+                if well.concentration is not None:
+                    if well.concentration not in concentration_positions:
+                        concentration_positions[well.concentration] = (well.row, well.column)
+                    else:
+                        # Keep the earliest position (top-left priority)
+                        curr_row, curr_col = concentration_positions[well.concentration]
+                        if (well.row < curr_row) or (well.row == curr_row and well.column < curr_col):
+                            concentration_positions[well.concentration] = (well.row, well.column)
+
+            # Sort by position but only return concentrations that have non-excluded wells
+            available_concentrations = set()
+            for well in self.wells:
+                if well.concentration is not None and not well.is_excluded():
+                    available_concentrations.add(well.concentration)
+
+            sorted_concentrations = [
+                conc for conc, pos in sorted(concentration_positions.items(), key=lambda x: x[1])
+                if conc in available_concentrations
+            ]
+
+            if sorted_concentrations:
+                return np.array(sorted_concentrations)
+            else:
+                return np.array([0.0])
+
+        else:  # order == 'position' (default behavior)
+            # Position-based ordering: current implementation
+            concentration_positions = {}
+            available_concentrations = set()
+
+            for well in self.wells:
+                if well.concentration is not None:
+                    # Track the earliest (topmost-leftmost) position for each concentration
+                    if well.concentration not in concentration_positions:
+                        concentration_positions[well.concentration] = (well.row, well.column)
+                    else:
+                        # Keep the earliest position (top-left priority: row first, then column)
+                        curr_row, curr_col = concentration_positions[well.concentration]
+                        if (well.row < curr_row) or (well.row == curr_row and well.column < curr_col):
+                            concentration_positions[well.concentration] = (well.row, well.column)
+
+                    # Track which concentrations are available (have non-excluded wells)
+                    if not well.is_excluded():
+                        available_concentrations.add(well.concentration)
+
+            # Sort concentrations by their original plate position (row, column)
+            # and filter to only include available concentrations
+            sorted_available_concentrations = [
+                conc for conc, pos in sorted(concentration_positions.items(), key=lambda x: x[1])
+                if conc in available_concentrations
+            ]
+
+            if sorted_available_concentrations:
+                return np.array(sorted_available_concentrations)
+            else:
+                return np.array([0.0])  # Default concentration
+
+    def has_time_series_data(self) -> bool:
+        """
+        Check if this sample has calculated time series data.
+
+        Returns
+        -------
+        bool
+            True if time series data exists, False otherwise
+        """
+        return (hasattr(self, 'time_series') and
+                self.time_series and
+                len(self.time_series) > 0)
+
+    def get_time_series_concentration_order(self) -> Optional[np.ndarray]:
+        """
+        Get the concentration order used for time series data columns.
+
+        Returns
+        -------
+        np.ndarray or None
+            Array of concentrations in time series column order, or None if no time series data
+        """
+        if hasattr(self, '_timeseries_concentration_order') and self._timeseries_concentration_order is not None:
+            return self._timeseries_concentration_order.copy()
+        return None
 
     def get_measurement_types(self) -> List[str]:
         """
@@ -153,7 +288,7 @@ class Sample:
         return list(measurement_types)
 
     def calculate_statistics(self, measurement_types: Optional[List[str]] = None,
-                           error_type: str = 'std'):
+                           error_type: str = 'std', concentration_order: str = 'value'):
         """
         Calculate replicate statistics for this sample.
 
@@ -163,6 +298,11 @@ class Sample:
             List of measurement types to process. If None, processes all available.
         error_type : str, default 'std'
             Type of error to calculate: 'std' or 'sem'
+        concentration_order : str, default 'value'
+            Order for organizing concentration data and time series columns:
+            - 'value': Order by concentration value (highest to lowest) - RECOMMENDED
+            - 'position': Order by plate position (original behavior)
+            - 'original': Order by original plate design positions
         """
         if measurement_types is None:
             measurement_types = self.get_measurement_types()
@@ -170,9 +310,25 @@ class Sample:
         if not measurement_types:
             return
 
-        # Get concentrations
-        self.concentrations = self.get_concentrations()
+        # Get concentrations using the specified ordering for time series organization
+        # This determines both the concentration array AND time series column order
+        self.concentrations = self.get_concentrations_custom_order(order=concentration_order)
         n_concentrations = len(self.concentrations)
+
+        # Store the canonical concentration order used for time series data
+        # This ensures get_concentrations() always returns the same order as time series columns
+        self._timeseries_concentration_order = self.concentrations.copy()
+
+        # Clear existing data to ensure clean recalculation
+        self.time_series.clear()
+        self.error.clear()
+        self.n_replicates.clear()
+
+        # Also clear derived data that depends on concentrations
+        self.blanked_data.clear()
+        self.blanked_data_error.clear()
+        self.normalized_data.clear()
+        self.normalized_data_error.clear()
 
         # Process each measurement type
         for measurement_type in measurement_types:
