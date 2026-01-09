@@ -8,6 +8,8 @@ from collections import defaultdict
 from .plate import Plate
 from .sample import Sample
 from .well import Well
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 
 class SampleFrame:
@@ -30,7 +32,7 @@ class SampleFrame:
         Dictionary mapping sample IDs to Sample objects
     """
 
-    def __init__(self, plates: Union[Plate, List[Plate]]):
+    def __init__(self, plates: Union[Plate, List[Plate]], keep_controls_separate: bool = False):
         """
         Initialize SampleFrame from plate(s).
 
@@ -38,11 +40,16 @@ class SampleFrame:
         ----------
         plates : Plate or List[Plate]
             Single plate or list of plates to process
+        keep_controls_separate : bool, default False
+            If True, control samples from different plates are kept separate
+            (named as 'control_plate1', 'control_plate2', etc.). If False,
+            controls with the same sample_type are merged across plates.
         """
         # Ensure plates is a list
         if not isinstance(plates, list):
             plates = [plates]
         self.plates = plates
+        self.keep_controls_separate = keep_controls_separate
 
         # Generate frame name
         if len(plates) == 1:
@@ -118,27 +125,43 @@ class SampleFrame:
         """
         Initialize Sample objects from wells across all plates.
         Groups wells by sample_type and creates Sample objects.
+
+        If keep_controls_separate=True, control samples from different plates
+        are kept separate with unique identifiers.
         """
-        # Dictionary to temporarily group wells by sample_type
+        # Dictionary to temporarily group wells by sample_type (and plate for controls)
         sample_groups = defaultdict(list)
 
         # Collect all wells from all plates
-        for plate in self.plates:
+        for plate_idx, plate in enumerate(self.plates):
             wells = self._get_wells_from_plate(plate)
+            plate_id = self.plate_ids[plate_idx]
 
             # Group wells by sample type
             for well in wells:
                 if well.sample_type is not None and not well.is_excluded():
-                    sample_groups[well.sample_type].append(well)
+                    # Determine grouping key
+                    if self.keep_controls_separate and well.is_control:
+                        # For controls, use sample_type + plate identifier
+                        group_key = f"{well.sample_type}_{plate_id}"
+                    else:
+                        # For non-controls (or when not separating), use just sample_type
+                        group_key = well.sample_type
+
+                    sample_groups[group_key].append(well)
 
         # Create Sample objects for each sample type
-        for sample_type, wells in sample_groups.items():
+        for sample_id, wells in sample_groups.items():
             if wells:  # Only create if we have wells
                 # Sort wells by their plate position to maintain consistent ordering
                 # This ensures concentrations stay in the original plate order
                 wells_sorted = sorted(wells, key=lambda w: (w.row, w.column))
-                sample = Sample(sample_type, wells_sorted)
-                self.samples[sample_type] = sample
+
+                # Use the original sample_type from the wells for the Sample object
+                # (the sample_id might have plate identifier appended for controls)
+                original_sample_type = wells_sorted[0].sample_type
+                sample = Sample(original_sample_type, wells_sorted)
+                self.samples[sample_id] = sample
 
     def _get_wells_from_plate(self, plate: Plate) -> List[Well]:
         """Get wells from a plate object."""
@@ -349,3 +372,212 @@ class SampleFrame:
     def __str__(self) -> str:
         """String representation showing summary."""
         return self.summary()
+
+    def plot_replicate_time_series(self,
+                                   measurement: str,
+                                   sample_ids: Optional[List[str]] = None,
+                                   show_mean: bool = True,
+                                   figsize: Optional[Tuple[int, int]] = None,
+                                   title: Optional[str] = None,
+                                   ylabel: Optional[str] = None,
+                                   xlabel: str = "Time (hours)") -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
+        """
+        Plot time series curves for replicates of samples at each concentration.
+
+        Creates a subplot for each sample-concentration combination, displaying the
+        individual replicate curves (wells) within that subplot. Optionally overlays
+        the mean curve across replicates.
+
+        Parameters
+        ----------
+        measurement : str
+            Measurement type to plot (e.g., 'OD600', 'GFP')
+        sample_ids : List[str], optional
+            List of sample IDs to include. If None, includes all test samples.
+        show_mean : bool, default True
+            Whether to overlay the mean curve across replicates with error band
+        figsize : Tuple[int, int], optional
+            Figure size (width, height) in inches. If None, auto-calculated based on
+            number of subplots (approx 3-4 inches per subplot)
+        title : str, optional
+            Figure title. If None, auto-generates based on measurement
+        ylabel : str, optional
+            Y-axis label. If None, uses the measurement type name
+        xlabel : str, default "Time (hours)"
+            X-axis label
+
+        Returns
+        -------
+        Tuple[plt.Figure, Dict[str, plt.Axes]]
+            - Figure object
+            - Dictionary mapping "(sample, concentration)" strings to Axes objects
+
+        Raises
+        ------
+        ValueError
+            If sample_ids are invalid or measurement is not found
+        RuntimeError
+            If wells don't have time_series data (raw data required, statistics optional)
+
+        Example
+        -------
+        >>> frame = SampleFrame(plates)
+        >>> fig, axes = frame.plot_replicate_time_series('OD600', sample_ids=['s14', 's15'])
+        >>> plt.show()
+        """
+        # Validate inputs
+        if not sample_ids:
+            sample_ids = self.get_test_samples()
+
+        if not sample_ids:
+            raise ValueError("No test samples found. Check your sample data.")
+
+        # Validate sample IDs
+        for sid in sample_ids:
+            if sid not in self.samples:
+                raise ValueError(f"Sample ID '{sid}' not found in SampleFrame")
+
+        # Check first that we have valid wells with the measurement
+        measurement_found = False
+        wells_with_data = 0
+
+        for sample_id in sample_ids:
+            sample = self.samples[sample_id]
+            if not sample.wells:
+                raise RuntimeError(f"Sample '{sample_id}' has no wells")
+
+            for well in sample.wells:
+                if measurement in well.time_series and not well.is_excluded():
+                    measurement_found = True
+                    if well.time_points is not None:
+                        wells_with_data += 1
+
+        if not measurement_found:
+            # Try to find what measurements ARE available
+            available_measurements = set()
+            for sample_id in sample_ids:
+                for well in self.samples[sample_id].wells:
+                    available_measurements.update(well.time_series.keys())
+            raise ValueError(f"Measurement '{measurement}' not found in wells. Available: {list(available_measurements) if available_measurements else 'none'}")
+
+        if wells_with_data == 0:
+            raise RuntimeError("No wells with valid time_points data found")
+
+        # Collect all (sample_id, concentration) pairs with their wells
+        subplot_data = {}  # Key: (sample_id, conc), Value: list of wells
+
+        for sample_id in sample_ids:
+            sample = self.samples[sample_id]
+            # Group wells by concentration for this sample
+            conc_groups = {}
+            for well in sample.wells:
+                if not well.is_excluded() and measurement in well.time_series:
+                    conc = well.concentration
+                    if conc not in conc_groups:
+                        conc_groups[conc] = []
+                    conc_groups[conc].append(well)
+
+            # Add to subplot data
+            for conc, wells in conc_groups.items():
+                if wells:  # Only if we have wells
+                    key = (sample_id, conc)
+                    subplot_data[key] = wells
+
+        if not subplot_data:
+            raise ValueError("No wells found with valid data")
+
+        # Sort by sample_id then concentration for consistent layout
+        sorted_keys = sorted(subplot_data.keys(), key=lambda x: (x[0], x[1]))
+        n_subplots = len(sorted_keys)
+
+        # Calculate grid dimensions for balanced rectangular layout
+        if figsize is None:
+            # Calculate dimensions to create a roughly square/rectangular layout
+            # Use golden ratio (~1.4) for more pleasant aspect ratio
+            n_cols = int(np.ceil(np.sqrt(n_subplots / 1.4)))
+            n_cols = max(2, min(n_cols, 8))  # Keep between 2-8 columns
+            n_rows = int(np.ceil(n_subplots / n_cols))
+            # Size: 3.5 inches per subplot in smaller dimension
+            figsize = (n_cols * 3.5, n_rows * 3.5)
+        else:
+            # If figsize provided, still calculate balanced grid
+            n_cols = int(np.ceil(np.sqrt(n_subplots / 1.4)))
+            n_cols = max(2, min(n_cols, 8))
+            n_rows = int(np.ceil(n_subplots / n_cols))
+
+        fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+        axes_flat = axes_array.flatten()
+
+        # Set overall title
+        if title is None:
+            title = f"Replicate Time Series - {measurement}"
+        fig.suptitle(title, fontsize=16, fontweight='bold', y=0.995)
+
+        # Store axes for return
+        axes_dict = {}
+
+        # Define colors for different samples
+        colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
+        color_map = {sid: colors[i] for i, sid in enumerate(sample_ids)}
+
+        # Plot for each (sample, concentration) combination
+        for subplot_idx, (sample_id, conc) in enumerate(sorted_keys):
+            ax = axes_flat[subplot_idx]
+            wells = subplot_data[(sample_id, conc)]
+            color = color_map[sample_id]
+
+            # Get time points from first valid well
+            time = None
+            for well in wells:
+                if well.time_points is not None:
+                    time = well.time_points
+                    break
+
+            if time is None:
+                raise RuntimeError(f"No valid time points found for {sample_id} at concentration {conc}. Check well.time_points are set.")
+
+            # Plot each replicate (individual well)
+            for well in wells:
+                if measurement in well.time_series:
+                    replicate_data = well.time_series[measurement]
+                    ax.plot(time, replicate_data, '-', color=color, alpha=0.6,
+                           linewidth=1.5, label=well.well_id, zorder=2)
+
+            # Optionally overlay mean and error band
+            if show_mean:
+                # Calculate mean and error from wells
+                replicate_arrays = np.column_stack([w.time_series[measurement] for w in wells])
+                mean_data = np.mean(replicate_arrays, axis=1)
+                error_data = np.std(replicate_arrays, axis=1)
+
+                # Plot mean
+                ax.plot(time, mean_data, 'o-', color=color, linewidth=2.5,
+                       markersize=6, label=f"{sample_id} mean", zorder=3)
+
+                # Add error band
+                ax.fill_between(time,
+                               mean_data - error_data,
+                               mean_data + error_data,
+                               alpha=0.15, color=color, zorder=1)
+
+            # Format subplot
+            ax.set_xlabel(xlabel, fontsize=10)
+            ax.set_ylabel(ylabel if ylabel else measurement, fontsize=10)
+            ax.set_title(f"{sample_id} [{conc}]", fontsize=11, fontweight='bold')
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.legend(loc='best', fontsize=8)
+
+            # Set reasonable axis limits
+            ax.set_ylim(bottom=0)
+            ax.margins(0.05)
+
+            # Store in dictionary
+            axes_dict[f"{sample_id}_{conc}"] = ax
+
+        # Hide unused subplots
+        for idx in range(n_subplots, len(axes_flat)):
+            axes_flat[idx].set_visible(False)
+
+        plt.tight_layout()
+
+        return fig, axes_dict

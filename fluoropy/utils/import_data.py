@@ -62,7 +62,14 @@ def _import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:floa
                 time[read_flag][time_i, 0] = _time_str_to_hours(read_line[0])
 
             for j, element in enumerate(read_line):
-                if j > 1 and element != "#N/A" and row < n_rows and col < n_cols and time_i < n_timepoints:
+                if j > 1 and element == "OVRFLW" and row < n_rows and col < n_cols and time_i < n_timepoints:
+                    data[read_flag][row, col, time_i] = np.nan
+                    element_index += 1
+                    col += 1
+                    if element_index % (n_cols) == 0:
+                        col = 0
+                        row += 1
+                elif j > 1 and element != "#N/A" and row < n_rows and col < n_cols and time_i < n_timepoints:
                     data[read_flag][row, col, time_i] = float(element)
                     element_index += 1
                     col += 1

@@ -366,7 +366,7 @@ class Plate:
     # ======================================================================
 
     def load_from_arrays(self, sample_map: np.ndarray, conc_map: Union[np.ndarray, List[List[float]]],
-                        data_dict: Dict[str, np.ndarray], time_dict: Dict[str, np.ndarray]):
+                        data_dict: Dict[str, np.ndarray], time_dict: Dict[str, np.ndarray], controls: List[str] = []):
         """
         Load data from numpy arrays (compatible with platereadertools output)
 
@@ -420,7 +420,8 @@ class Plate:
                 # Determine well classification
                 is_blank = "Blank" in str(sample_type) if sample_type else False
                 is_control = ("NC" in str(sample_type) or "Control" in str(sample_type) or
-                             "WT" in str(sample_type)) if sample_type else False
+                             "WT" in str(sample_type) or sample_type in controls) if sample_type else False
+
 
                 # Set well attributes using the set_sample_info method
                 well.set_sample_info(
@@ -684,7 +685,7 @@ class Plate:
     def calculate_timepoint_statistics(self, measurement_type: str, timepoint_idx: int,
                                      sample_types: Optional[List[str]] = None,
                                      exclude_blanks: bool = True,
-                                     exclude_controls: bool = False) -> Dict[str, Dict[str, float]]:
+                                     exclude_controls: bool = False) -> Dict[str, Dict[str, Any]]:
         """
         Calculate summary statistics for each sample type and concentration at a given timepoint.
 
@@ -703,19 +704,19 @@ class Plate:
 
         Returns
         -------
-        Dict[str, Dict[str, float]]
+        Dict[str, Dict[str, Any]]
             Dictionary with 'sample_type_concentration' keys, and statistics dictionaries as values.
-            Each statistics dictionary contains: 'mean', 'std', 'sem', 'count', 'min', 'max', 'median', 'q25', 'q75', 'iqr'
+            Each statistics dictionary contains: 'mean', 'std', 'sem', 'count', 'min', 'max', 'median', 'q25', 'q75', 'iqr', 'outlier_wells'
 
         Examples
         --------
         >>> stats = plate.calculate_timepoint_statistics('OD600', timepoint_idx=10)
         >>> print(stats['sample_1_10.0']['mean'])  # Mean OD600 for sample_1 at 10.0 concentration
-        >>> print(stats['sample_1_5.0']['sem'])    # SEM for sample_1 at 5.0 concentration
+        >>> print(stats['sample_1_5.0']['outlier_wells'])  # List of outlier well IDs for sample_1 at 5.0 concentration
         """
         from collections import defaultdict
 
-        # Group wells by (sample_type, concentration)
+        # Group wells by (sample_type, concentration) with well information
         sample_conc_groups = defaultdict(list)
 
         for well in self.wells.values():
@@ -749,19 +750,26 @@ class Plate:
             # Create group key (sample_type, concentration)
             group_key = f"{sample_type}_{concentration}"
 
-            # Add value to group
+            # Add value and well information to group
             value = time_series[timepoint_idx]
-            sample_conc_groups[group_key].append(value)
+            well_id = getattr(well, 'well_id', getattr(well, 'position', 'Unknown'))
+            sample_conc_groups[group_key].append({'value': value, 'well_id': well_id, 'well': well})
 
         # Calculate statistics for each (sample_type, concentration) group
         statistics = {}
 
-        for group_key, values in sample_conc_groups.items():
-            if not values:
+        for group_key, well_data_list in sample_conc_groups.items():
+            if not well_data_list:
                 continue
+
+            # Extract values and well information
+            values = [item['value'] for item in well_data_list]
+            well_ids = [item['well_id'] for item in well_data_list]
+            wells = [item['well'] for item in well_data_list]
 
             values_array = np.array(values)
 
+            # Calculate basic statistics
             stats = {
                 'mean': np.mean(values_array),
                 'std': np.std(values_array, ddof=1) if len(values_array) > 1 else 0.0,
@@ -772,10 +780,27 @@ class Plate:
                 'median': np.median(values_array)
             }
 
-            # Add quartiles
+            # Add quartiles and IQR
             stats['q25'] = np.percentile(values_array, 25)
             stats['q75'] = np.percentile(values_array, 75)
             stats['iqr'] = stats['q75'] - stats['q25']
+
+            # Identify outliers using IQR method (values outside Q1 - 1.5*IQR or Q3 + 1.5*IQR)
+            outlier_wells = []
+            if len(values_array) > 2 and stats['iqr'] > 0:  # Need at least 3 values and non-zero IQR
+                lower_bound = stats['q25'] - 1.5 * stats['iqr']
+                upper_bound = stats['q75'] + 1.5 * stats['iqr']
+
+                for i, value in enumerate(values):
+                    if value < lower_bound or value > upper_bound:
+                        outlier_wells.append({
+                            'well_id': well_ids[i],
+                            'value': value,
+                            'z_score': (value - stats['mean']) / stats['std'] if stats['std'] > 0 else 0
+                        })
+
+            stats['outlier_wells'] = outlier_wells
+            stats['outlier_count'] = len(outlier_wells)
 
             statistics[group_key] = stats
 
@@ -784,7 +809,8 @@ class Plate:
     def get_timepoint_summary_table(self, measurement_type: str, timepoint_idx: int,
                                   sample_types: Optional[List[str]] = None,
                                   exclude_blanks: bool = True,
-                                  exclude_controls: bool = False) -> 'pd.DataFrame':
+                                  exclude_controls: bool = False,
+                                  include_outliers: bool = True) -> 'pd.DataFrame':
         """
         Get summary statistics as a formatted pandas DataFrame.
 
@@ -800,11 +826,14 @@ class Plate:
             Whether to exclude blank wells
         exclude_controls : bool, default False
             Whether to exclude control wells
+        include_outliers : bool, default True
+            Whether to include outlier information in the DataFrame
 
         Returns
         -------
         pd.DataFrame
-            DataFrame with sample types as index and statistics as columns
+            DataFrame with sample types as index and statistics as columns.
+            If include_outliers=True, includes 'outlier_count' and 'outlier_wells' columns.
         """
         stats = self.calculate_timepoint_statistics(
             measurement_type, timepoint_idx, sample_types,
@@ -823,7 +852,338 @@ class Plate:
             if col in df.columns:
                 df[col] = df[col].round(4)
 
+        if include_outliers:
+            # Format outlier wells for better display
+            if 'outlier_wells' in df.columns:
+                df['outlier_wells_formatted'] = df['outlier_wells'].apply(
+                    lambda x: '; '.join([f"{well['well_id']}({well['value']:.2f})" for well in x]) if x else 'None'
+                )
+
+                # Keep outlier_count for quick reference
+                df['outlier_count'] = df['outlier_count'] if 'outlier_count' in df.columns else 0
+
+                # Reorder columns to put outlier info at the end
+                base_cols = [col for col in df.columns if col not in ['outlier_wells', 'outlier_wells_formatted', 'outlier_count']]
+                outlier_cols = ['outlier_count', 'outlier_wells_formatted']
+                df = df[base_cols + outlier_cols]
+        else:
+            # Remove outlier columns if not wanted
+            outlier_cols = ['outlier_wells', 'outlier_count', 'outlier_wells_formatted']
+            df = df.drop(columns=[col for col in outlier_cols if col in df.columns])
+
         # Sort by sample type
         df = df.sort_index()
 
         return df
+
+    def get_outlier_wells(self, measurement_type: str, timepoint_idx: int,
+                         sample_types: Optional[List[str]] = None,
+                         exclude_blanks: bool = True,
+                         exclude_controls: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Get outlier wells for each sample type and concentration at a given timepoint.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to analyze
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        sample_types : List[str], optional
+            Specific sample types to analyze
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells
+        exclude_controls : bool, default False
+            Whether to exclude control wells
+
+        Returns
+        -------
+        Dict[str, List[Dict[str, Any]]]
+            Dictionary with 'sample_type_concentration' keys and lists of outlier well information.
+            Each outlier dictionary contains: 'well_id', 'value', 'z_score'
+
+        Examples
+        --------
+        >>> outliers = plate.get_outlier_wells('OD600', timepoint_idx=10)
+        >>> print(outliers['sample_1_10.0'])  # List of outlier wells for sample_1 at 10.0 concentration
+        """
+        stats = self.calculate_timepoint_statistics(
+            measurement_type, timepoint_idx, sample_types,
+            exclude_blanks, exclude_controls
+        )
+
+        outliers = {}
+        for group_key, group_stats in stats.items():
+            if 'outlier_wells' in group_stats:
+                outliers[group_key] = group_stats['outlier_wells']
+
+        return outliers
+
+    def calculate_zscore_normalization(self, measurement_type: str, timepoint_idx: int,
+                                     exclude_blanks: bool = True,
+                                     exclude_controls: bool = False) -> Dict[str, float]:
+        """
+        Calculate z-score normalization for all wells at a specific timepoint.
+
+        Z-score = (value - mean) / std_dev
+
+        This normalizes values across the entire plate, making it easy to identify
+        wells that deviate significantly from the plate average.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to normalize
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells from the calculation of plate statistics
+        exclude_controls : bool, default False
+            Whether to exclude control wells from the calculation of plate statistics
+
+        Returns
+        -------
+        Dict[str, float]
+            Dictionary with well IDs as keys and z-scores as values.
+            Wells excluded from calculation will not be included in the result.
+
+        Examples
+        --------
+        >>> z_scores = plate.calculate_zscore_normalization('OD600', timepoint_idx=10)
+        >>> print(z_scores['A1'])  # Z-score for well A1
+        >>> extreme_wells = {k: v for k, v in z_scores.items() if abs(v) > 2}  # Wells with |z| > 2
+        """
+        # Collect all values for plate-wide statistics
+        all_values = []
+        well_values = {}
+
+        for well in self.wells.values():
+            # Skip excluded wells
+            if hasattr(well, 'exclude') and well.exclude:
+                continue
+
+            # Skip wells without the measurement
+            if not (hasattr(well, 'time_series') and measurement_type in well.time_series):
+                continue
+
+            # Skip wells without enough timepoints
+            time_series = well.time_series[measurement_type]
+            if len(time_series) <= timepoint_idx:
+                continue
+
+            # Apply exclusion criteria for plate statistics calculation
+            if exclude_blanks and hasattr(well, 'is_blank') and well.is_blank:
+                continue
+            if exclude_controls and hasattr(well, 'is_control') and well.is_control:
+                continue
+
+            # Get well ID and value
+            well_id = getattr(well, 'well_id', getattr(well, 'position', 'Unknown'))
+            value = time_series[timepoint_idx]
+
+            all_values.append(value)
+            well_values[well_id] = value
+
+        if len(all_values) < 2:
+            # Need at least 2 values to calculate standard deviation
+            return {}
+
+        # Calculate plate-wide statistics
+        plate_mean = np.mean(all_values)
+        plate_std = np.std(all_values, ddof=1)
+
+        if plate_std == 0:
+            # If standard deviation is 0, all values are the same
+            return {well_id: 0.0 for well_id in well_values.keys()}
+
+        # Calculate z-scores
+        z_scores = {}
+        for well_id, value in well_values.items():
+            z_scores[well_id] = (value - plate_mean) / plate_std
+
+        return z_scores
+
+    def apply_zscore_normalization(self, measurement_type: str, timepoint_idx: int,
+                                 exclude_blanks: bool = True,
+                                 exclude_controls: bool = False,
+                                 store_in_metadata: bool = True) -> Dict[str, float]:
+        """
+        Apply z-score normalization and optionally store results in well metadata.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to normalize
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells from plate statistics calculation
+        exclude_controls : bool, default False
+            Whether to exclude control wells from plate statistics calculation
+        store_in_metadata : bool, default True
+            Whether to store z-scores in well metadata for later access
+
+        Returns
+        -------
+        Dict[str, float]
+            Dictionary with well IDs as keys and z-scores as values
+
+        Examples
+        --------
+        >>> z_scores = plate.apply_zscore_normalization('OD600', timepoint_idx=10)
+        >>> # Z-scores are now stored in each well's metadata
+        >>> well_a1 = plate['A1']
+        >>> print(well_a1.metadata.get('zscore_OD600_tp10'))  # Access stored z-score
+        """
+        z_scores = self.calculate_zscore_normalization(
+            measurement_type, timepoint_idx, exclude_blanks, exclude_controls
+        )
+
+        if store_in_metadata:
+            # Store z-scores in well metadata
+            metadata_key = f"zscore_{measurement_type}_tp{timepoint_idx}"
+
+            for well_id, z_score in z_scores.items():
+                well = self.wells.get(well_id)
+                if well:
+                    if not hasattr(well, 'metadata'):
+                        well.metadata = {}
+                    well.metadata[metadata_key] = z_score
+
+        return z_scores
+
+    def get_zscore_matrix(self, measurement_type: str, timepoint_idx: int,
+                         exclude_blanks: bool = True,
+                         exclude_controls: bool = False) -> np.ndarray:
+        """
+        Get z-scores as a 2D matrix matching the plate layout for visualization.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to normalize
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells from plate statistics calculation
+        exclude_controls : bool, default False
+            Whether to exclude control wells from plate statistics calculation
+
+        Returns
+        -------
+        np.ndarray
+            2D array of z-scores with shape (rows, cols) matching plate layout.
+            Wells excluded from analysis will have NaN values.
+
+        Examples
+        --------
+        >>> z_matrix = plate.get_zscore_matrix('OD600', timepoint_idx=10)
+        >>> import matplotlib.pyplot as plt
+        >>> plt.imshow(z_matrix, cmap='RdBu_r', vmin=-3, vmax=3)
+        >>> plt.colorbar(label='Z-score')
+        >>> plt.title('Plate Z-score Heatmap')
+        """
+        z_scores = self.calculate_zscore_normalization(
+            measurement_type, timepoint_idx, exclude_blanks, exclude_controls
+        )
+
+        # Create matrix with NaN for missing values
+        z_matrix = np.full((self.rows, self.cols), np.nan)
+
+        for well_id, z_score in z_scores.items():
+            well = self.wells.get(well_id)
+            if well:
+                # Parse row and column from well_id
+                row_idx = ord(well_id[0]) - ord('A')
+                col_idx = int(well_id[1:]) - 1
+
+                if 0 <= row_idx < self.rows and 0 <= col_idx < self.cols:
+                    z_matrix[row_idx, col_idx] = z_score
+
+        return z_matrix
+
+    def plot_zscore_heatmap(self, measurement_type: str, timepoint_idx: int,
+                           exclude_blanks: bool = True,
+                           exclude_controls: bool = False,
+                           figsize: tuple = (10, 6),
+                           title: Optional[str] = None,
+                           vmin: float = -3,
+                           vmax: float = 3) -> 'matplotlib.figure.Figure':
+        """
+        Plot a heatmap of z-scores across the plate.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement to plot
+        timepoint_idx : int
+            Index of the timepoint to analyze (0-based)
+        exclude_blanks : bool, default True
+            Whether to exclude blank wells from plate statistics calculation
+        exclude_controls : bool, default False
+            Whether to exclude control wells from plate statistics calculation
+        figsize : tuple, default (10, 6)
+            Figure size in inches (width, height)
+        title : str, optional
+            Plot title. If None, generates automatic title.
+        vmin : float, default -3
+            Minimum value for color scale
+        vmax : float, default 3
+            Maximum value for color scale
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The created figure object
+
+        Examples
+        --------
+        >>> fig = plate.plot_zscore_heatmap('OD600', timepoint_idx=10)
+        >>> plt.show()
+        """
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            print("matplotlib is required for plotting. Install with: pip install matplotlib")
+            return None
+
+        z_matrix = self.get_zscore_matrix(
+            measurement_type, timepoint_idx, exclude_blanks, exclude_controls
+        )
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Create heatmap
+        im = ax.imshow(z_matrix, cmap='RdBu_r', vmin=vmin, vmax=vmax, aspect='auto')
+
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('Z-score', rotation=270, labelpad=20)
+
+        # Set labels
+        ax.set_xlabel('Column')
+        ax.set_ylabel('Row')
+
+        # Set ticks
+        ax.set_xticks(range(self.cols))
+        ax.set_xticklabels([str(i+1) for i in range(self.cols)])
+        ax.set_yticks(range(self.rows))
+        ax.set_yticklabels([chr(ord('A') + i) for i in range(self.rows)])
+
+        # Set title
+        if title is None:
+            title = f'Z-score Heatmap: {measurement_type} (Timepoint {timepoint_idx})'
+        ax.set_title(title)
+
+        # Add well labels for extreme values
+        for i in range(self.rows):
+            for j in range(self.cols):
+                z_val = z_matrix[i, j]
+                if not np.isnan(z_val) and abs(z_val) > 2:
+                    well_id = f"{chr(ord('A') + i)}{j + 1}"
+                    ax.text(j, i, f'{z_val:.1f}', ha='center', va='center',
+                           color='white' if abs(z_val) > 2.5 else 'black',
+                           fontweight='bold', fontsize=8)
+
+        plt.tight_layout()
+        return fig

@@ -428,12 +428,13 @@ class Sample:
                 self.blanked_data_error[measurement_type] = np.sqrt(
                     self.error[measurement_type]**2 + blank_sample.error[measurement_type]**2
                 )
-
     def calculate_normalized_data(self, od_measurement: str = 'OD600',
                                 offset: float = 0.01,
                                 measurement_types: Optional[List[str]] = None):
         """
-        Calculate normalized data: blanked_measurement / (offset + blanked_OD).
+        Calculate normalized data: measurement / (offset + OD).
+
+        Uses blanked data if available, otherwise falls back to raw time series data.
 
         Parameters
         ----------
@@ -442,27 +443,55 @@ class Sample:
         offset : float, default 0.01
             Offset added to OD to avoid division by zero
         measurement_types : List[str], optional
-            Measurement types to normalize. If None, processes all available blanked data.
+            Measurement types to normalize. If None, processes all available data.
         """
-        if od_measurement not in self.blanked_data:
-            print(f"Warning: {od_measurement} not found in blanked data. Cannot normalize.")
+        # Check if we have blanked data or need to fall back to time series
+        use_blanked_data = od_measurement in self.blanked_data
+        use_time_series = od_measurement in self.time_series
+
+        if not use_blanked_data and not use_time_series:
+            print(f"Warning: {od_measurement} not found in either blanked data or time series data. Cannot normalize.")
             return
 
-        od_data = self.blanked_data[od_measurement]
-        od_err = self.blanked_data_error[od_measurement]
+        # Determine data source and issue warnings if needed
+        if use_blanked_data:
+            od_data = self.blanked_data[od_measurement]
+            od_err = self.blanked_data_error[od_measurement]
+            data_source = self.blanked_data
+            error_source = self.blanked_data_error
+            data_type_name = "blanked data"
+        else:
+            print(f"Warning: Using raw time series data for normalization instead of blanked data. "
+                  f"Consider running calculate_blanked_data() first for more accurate results.")
+            od_data = self.time_series[od_measurement]
+            od_err = self.error[od_measurement]
+            data_source = self.time_series
+            error_source = self.error
+            data_type_name = "time series data"
 
         if measurement_types is None:
-            measurement_types = list(self.blanked_data.keys())
+            measurement_types = list(data_source.keys())
 
         for measurement_type in measurement_types:
-            if measurement_type in self.blanked_data:
-                measurement_data = self.blanked_data[measurement_type]
-                measurement_err = self.blanked_data_error[measurement_type]
+            if measurement_type in data_source:
+                measurement_data = data_source[measurement_type]
+                measurement_err = error_source[measurement_type]
+
+                # Calculate normalized data
                 self.normalized_data[measurement_type] = measurement_data / (od_data + offset)
-                self.normalized_data_error[measurement_type] = measurement_data / (od_data + offset) * np.sqrt(
-                    (measurement_err / measurement_data)**2 +
-                    (od_err / (od_data + offset))**2
-                )
+
+                # Calculate normalized error using error propagation
+                # For f = a/b, relative error = sqrt((δa/a)² + (δb/b)²)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    rel_err_measurement = np.where(measurement_data != 0,
+                                                 measurement_err / np.abs(measurement_data), 0)
+                    rel_err_od = np.where((od_data + offset) != 0,
+                                        od_err / np.abs(od_data + offset), 0)
+
+                    self.normalized_data_error[measurement_type] = (
+                        self.normalized_data[measurement_type] *
+                        np.sqrt(rel_err_measurement**2 + rel_err_od**2)
+                    )
 
     def get_data(self, measurement_type: str, data_type: str = 'time_series') -> Optional[np.ndarray]:
         """
