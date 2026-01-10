@@ -62,6 +62,8 @@ class Well:
         self.time_series: Dict[str, np.ndarray] = {}  # Raw time series data
         self.time_points: Optional[np.ndarray] = None
 
+        plate_id: None
+
         # Metadata storage
         self.metadata: Dict[str, Any] = {}
 

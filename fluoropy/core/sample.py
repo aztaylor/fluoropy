@@ -52,12 +52,17 @@ class Sample:
         """
         self.sample_type = sample_type
         self.wells = wells or []
+        self.plate_id = None  # Plate identifier if needed
 
         # Core data structures
         self.time_series: Dict[str, np.ndarray] = {}  # Mean data
         self.error: Dict[str, np.ndarray] = {}        # Error data (std/sem)
         self.time: Optional[np.ndarray] = None        # Time points
         self.concentrations: Optional[np.ndarray] = None  # Concentration values
+
+        # Individual replicate time series (for each well)
+        # Format: {measurement_type: {concentration: [well_data_1, well_data_2, ...]}}
+        self.individual_time_series: Dict[str, Dict[float, List[np.ndarray]]] = {}
 
         # Processed data structures
         self.blanked_data: Dict[str, np.ndarray] = {}      # Blank-subtracted
@@ -396,6 +401,67 @@ class Sample:
         # Store results
         self.time_series[measurement_type] = mean_array
         self.error[measurement_type] = error_array
+
+    def populate_individual_time_series(self, measurement_types: Optional[List[str]] = None):
+        """
+        Populate individual_time_series with raw data from each well.
+
+        Stores individual replicate data organized by measurement type and concentration.
+        Format: {measurement_type: {concentration: [replicate_1_data, replicate_2_data, ...]}}
+
+        Parameters
+        ----------
+        measurement_types : List[str], optional
+            Measurement types to extract. If None, extracts all available measurements.
+        """
+        if measurement_types is None:
+            measurement_types = self.get_measurement_types()
+
+        self.individual_time_series.clear()
+
+        for measurement_type in measurement_types:
+            self.individual_time_series[measurement_type] = {}
+
+            # Group wells by concentration
+            concentration_groups = {}
+            for well in self.wells:
+                if well.is_excluded():
+                    continue
+
+                measurement_data = well.get_measurement(measurement_type)
+                if measurement_data is None:
+                    continue
+
+                conc = well.concentration if well.concentration is not None else 0.0
+                if conc not in concentration_groups:
+                    concentration_groups[conc] = []
+                concentration_groups[conc].append(measurement_data)
+
+            # Store data for each concentration
+            for conc, data_list in concentration_groups.items():
+                self.individual_time_series[measurement_type][conc] = data_list
+
+    def get_individual_replicate_data(self, measurement_type: str,
+                                     concentration: float) -> Optional[List[np.ndarray]]:
+        """
+        Get individual replicate time series data for a measurement at a specific concentration.
+
+        Parameters
+        ----------
+        measurement_type : str
+            Type of measurement (e.g., 'OD600', 'GFP')
+        concentration : float
+            Concentration value
+
+        Returns
+        -------
+        List[np.ndarray] or None
+            List of time series arrays (one per replicate), or None if not found
+        """
+        if measurement_type not in self.individual_time_series:
+            return None
+
+        return self.individual_time_series[measurement_type].get(concentration)
 
     def calculate_blanked_data(self, blank_sample: 'Sample',
                              measurement_types: Optional[List[str]] = None):

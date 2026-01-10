@@ -81,6 +81,7 @@ class Plate:
             for col in range(self.cols):
                 well_id = f"{chr(ord('A') + row)}{col + 1}"
                 self.wells[well_id] = Well(well_id, row, col)
+                self.wells[well_id].plate_id = self.plate_id  # Assign plate_id to each well
 
     # ======================================================================
     # INDEXING AND ITERATION METHODS

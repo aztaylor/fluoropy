@@ -157,10 +157,15 @@ class SampleFrame:
                 # This ensures concentrations stay in the original plate order
                 wells_sorted = sorted(wells, key=lambda w: (w.row, w.column))
 
+                # Debug: Print well details before creating Sample
+                #well_details = [(w.well_id, id(w)) for w in wells_sorted]
+                #print(f"DEBUG _init_samples: {sample_id} has {len(wells_sorted)} wells: {well_details}")
+
                 # Use the original sample_type from the wells for the Sample object
                 # (the sample_id might have plate identifier appended for controls)
                 original_sample_type = wells_sorted[0].sample_type
                 sample = Sample(original_sample_type, wells_sorted)
+                sample.plate_id = plate_id  # Store plate ID if needed
                 self.samples[sample_id] = sample
 
     def _get_wells_from_plate(self, plate: Plate) -> List[Well]:
@@ -178,23 +183,593 @@ class SampleFrame:
 
         return wells
 
-    def calculate_all_statistics(self, measurement_types: Optional[List[str]] = None,
-                               error_type: str = 'std'):
+    def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None) -> None:
         """
-        Calculate replicate statistics for all samples.
+        Calculate blank-subtracted time series data for individual samples.
+
+        For each sample, subtracts the blank from the same media type and plate_id.
+        Stores result in sample.blank_subtracted_timeseries attribute.
 
         Parameters
         ----------
         measurement_types : List[str], optional
-            List of measurement types to process. If None, auto-detects from wells.
-        error_type : str, default 'std'
-            Type of error to calculate: 'std' or 'sem'
+            Measurement types to process. If None, processes all available.
+        """
+        if measurement_types is None:
+            measurement_types = self._detect_measurement_types()
+
+        # Group blanks by media type and plate_id for efficient lookup
+        blanks_by_media_plate: Dict[Tuple[str, str], 'Sample'] = {}
+
+        for sample_id, sample in self.samples.items():
+            if sample.is_blank:
+                key = (sample.medium, sample.plate_id)
+                blanks_by_media_plate[key] = sample
+
+        # Calculate blank-subtracted data for non-blank samples
+        for sample in self.samples.values():
+            if sample.is_blank:
+                continue
+
+            # Find matching blank
+            blank_key = (sample.medium, sample.plate_id)
+            blank_sample = blanks_by_media_plate.get(blank_key)
+
+            if blank_sample is None:
+                print(f"Warning: No blank found for {sample.sample_type} (medium={sample.medium}, plate={sample.plate_id})")
+                continue
+
+            # Calculate blank-subtracted data
+            sample.calculate_blanked_data(blank_sample, measurement_types)
+            sample.blank_subtracted_timeseries = sample.blanked_data
+
+    def calculate_normalized_timeseries(self, od_measurement: str = 'OD600',
+                                       alpha: float = 0.01,
+                                       measurement_types: Optional[List[str]] = None) -> None:
+        """
+        Calculate normalized time series data using the form: read1 / (alpha + read2).
+
+        Stores result in sample.normalized_timeseries attribute.
+
+        Parameters
+        ----------
+        od_measurement : str, default 'OD600'
+            OD measurement to use as the denominator (read2)
+        alpha : float, default 0.01
+            Normalization offset (alpha parameter)
+        measurement_types : List[str], optional
+            Measurement types to normalize. If None, processes all available.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
 
         for sample in self.samples.values():
-            sample.calculate_statistics(measurement_types, error_type)
+            if sample.is_blank:
+                continue
+
+            # Use blank-subtracted data if available, otherwise raw time series
+            if sample.blanked_data:
+                sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
+                sample.normalized_timeseries = sample.normalized_data
+            else:
+                print(f"Warning: No blank-subtracted data for {sample.sample_type}. "
+                      f"Call calculate_blank_subtracted_timeseries() first.")
+
+    def calculate_fold_change(self, measurement: str,
+                            od_measurement: str = 'OD600',
+                            alpha: float = 0.01) -> None:
+        """
+        Calculate log fold change of samples by negative control at each timepoint.
+
+        Process flow (applied to individual replicates):
+        1. Subtract blank from sample and control (blank_subtracted_timeseries)
+        2. Normalize by OD: measurement / (alpha + OD) (normalized_timeseries)
+        3. For each non-zero concentration:
+           - Calculate ratio of normalized sample to normalized zero-concentration control
+           - Result: fold change at each timepoint
+
+        Stores result in sample.fold_change attribute as a pandas DataFrame.
+        Columns: timepoint indices
+        Rows: (concentration, replicate) indices
+
+        Parameters
+        ----------
+        measurement : str
+            Measurement type to calculate fold change for (e.g., 'GFP')
+        od_measurement : str, default 'OD600'
+            OD measurement for normalization
+        alpha : float, default 0.01
+            Normalization offset
+        """
+        import pandas as pd
+
+        # First ensure we have blank-subtracted and normalized data
+        self.calculate_blank_subtracted_timeseries([measurement, od_measurement])
+        self.calculate_normalized_timeseries(od_measurement, alpha, [measurement])
+
+        # Calculate fold change for each test sample
+        for sample_id, sample in self.samples.items():
+            if sample.is_blank or sample.is_control:
+                continue
+
+            # Find matching negative control (same plate_id)
+            control = None
+            for cand_id, cand_sample in self.samples.items():
+                if cand_sample.is_control and cand_sample.plate_id == sample.plate_id:
+                    control = cand_sample
+                    break
+
+            if control is None:
+                print(f"Warning: No negative control found for {sample_id} on plate {sample.plate_id}")
+                continue
+
+            # Build fold change dataframe by processing individual replicates
+            fold_change_data = self._calculate_individual_fold_changes(
+                sample, control, measurement, od_measurement, alpha
+            )
+
+            sample.fold_change = fold_change_data
+
+    def _calculate_individual_fold_changes(self, sample: 'Sample', control: 'Sample',
+                                          measurement: str, od_measurement: str,
+                                          alpha: float) -> 'pd.DataFrame':
+        """
+        Calculate fold change for individual replicates with proper normalization.
+
+        Process for each replicate:
+        1. Normalize sample at conc C by OD: blanked_measurement / (alpha + blanked_OD)
+        2. Normalize sample at conc 0 by OD: blanked_measurement / (alpha + blanked_OD)
+        3. Calculate within-sample fold change: normalized_sample_C / normalized_sample_0
+        4. Normalize by control: within_sample_FC / normalized_control_0
+
+        Returns DataFrame with rows as (concentration, replicate_index) and columns as timepoints.
+        """
+        import pandas as pd
+
+        # Find the blank samples for both sample and control
+        blank_sample_key = (sample.medium, sample.plate_id)
+        control_blank_key = (control.medium, control.plate_id)
+
+        # Get blanks
+        blanks_by_media_plate: Dict[Tuple[str, str], 'Sample'] = {}
+        for s in self.samples.values():
+            if s.is_blank:
+                key = (s.medium, s.plate_id)
+                blanks_by_media_plate[key] = s
+
+        blank = blanks_by_media_plate.get(blank_sample_key)
+        control_blank = blanks_by_media_plate.get(control_blank_key)
+
+        # Group sample wells by concentration
+        sample_wells_by_conc = {}
+        for well in sample.wells:
+            if well.is_excluded():
+                continue
+            conc = well.concentration if well.concentration is not None else 0.0
+            if conc not in sample_wells_by_conc:
+                sample_wells_by_conc[conc] = []
+            sample_wells_by_conc[conc].append(well)
+
+        # Group control wells by concentration
+        control_wells_by_conc = {}
+        for well in control.wells:
+            if well.is_excluded():
+                continue
+            conc = well.concentration if well.concentration is not None else 0.0
+            if conc not in control_wells_by_conc:
+                control_wells_by_conc[conc] = []
+            control_wells_by_conc[conc].append(well)
+
+        # Get sample wells at zero concentration (for normalization)
+        sample_zero_wells = sample_wells_by_conc.get(0.0, [])
+        if not sample_zero_wells:
+            raise ValueError(f"No zero-concentration wells found in sample")
+
+        # Get control wells at zero concentration
+        control_zero_wells = control_wells_by_conc.get(0.0, [])
+        if not control_zero_wells:
+            raise ValueError(f"No zero-concentration wells found in control")
+
+        # Extract time points
+        time_points = sample.time if sample.time is not None else np.arange(len(sample_zero_wells[0].time_series[measurement]))
+        n_timepoints = len(time_points)
+
+        # Calculate normalized values for sample at zero concentration
+        sample_zero_normalized = self._get_normalized_replicate_values(
+            sample_zero_wells, blank, measurement, od_measurement, alpha
+        )  # Shape: (n_replicates, n_timepoints)
+        sample_zero_mean = np.mean(sample_zero_normalized, axis=0)  # Shape: (n_timepoints,)
+
+        # Calculate normalized values for control at zero concentration
+        control_zero_normalized = self._get_normalized_replicate_values(
+            control_zero_wells, control_blank, measurement, od_measurement, alpha
+        )  # Shape: (n_replicates, n_timepoints)
+        control_zero_mean = np.mean(control_zero_normalized, axis=0)  # Shape: (n_timepoints,)
+
+        # Build fold change data
+        fold_change_rows = []
+        row_indices = []
+
+        # Only process non-zero concentrations
+        for conc in sorted(sample_wells_by_conc.keys()):
+            if conc == 0.0:
+                continue  # Skip zero concentration for fold change calculation
+
+            wells = sample_wells_by_conc[conc]
+            sample_conc_normalized = self._get_normalized_replicate_values(
+                wells, blank, measurement, od_measurement, alpha
+            )  # Shape: (n_replicates, n_timepoints)
+
+            # Get control wells at the same concentration (if available)
+            control_wells = control_wells_by_conc.get(conc, [])
+
+            if control_wells:
+                # If control has this concentration, use it
+                control_conc_normalized = self._get_normalized_replicate_values(
+                    control_wells, control_blank, measurement, od_measurement, alpha
+                )  # Shape: (n_replicates, n_timepoints)
+                control_conc_mean = np.mean(control_conc_normalized, axis=0)  # Shape: (n_timepoints,)
+
+                # Fold change: (Sample_C / Sample_0) / (Control_C / Control_0)
+                for rep_idx, normalized_rep in enumerate(sample_conc_normalized):
+                    within_sample_fc = normalized_rep / sample_zero_mean  # Sample C / Sample 0
+                    within_control_fc = control_conc_mean / control_zero_mean  # Control C / Control 0
+                    fold_change = within_sample_fc / within_control_fc
+                    fold_change_rows.append(fold_change)
+                    row_indices.append((conc, rep_idx))
+            else:
+                # If control doesn't have this concentration, just use control at 0
+                # Fold change: (Sample_C / Sample_0) / Control_0
+                for rep_idx, normalized_rep in enumerate(sample_conc_normalized):
+                    within_sample_fc = normalized_rep / sample_zero_mean  # Sample C / Sample 0
+                    fold_change = within_sample_fc / control_zero_mean
+                    fold_change_rows.append(fold_change)
+                    row_indices.append((conc, rep_idx))
+
+        # Create DataFrame
+        if fold_change_rows:
+            df = pd.DataFrame(
+                fold_change_rows,
+                index=pd.MultiIndex.from_tuples(row_indices, names=['concentration', 'replicate']),
+                columns=[i for i in range(n_timepoints)]
+            )
+        else:
+            df = pd.DataFrame()
+
+        return df
+
+    def _get_normalized_replicate_values(self, wells: List['Well'], blank: 'Sample',
+                                        measurement: str, od_measurement: str,
+                                        alpha: float) -> np.ndarray:
+        """
+        Calculate normalized values for a list of wells.
+
+        For each well:
+        1. Subtract blank (if available): blanked_measurement = well_measurement - blank_measurement
+        2. Normalize: blanked_measurement / (alpha + blanked_OD)
+
+        Falls back to raw well data if blank data is not available.
+
+        Returns array of shape (n_wells, n_timepoints).
+        """
+        normalized_values = []
+
+        # Get blank data for this measurement and OD
+        # Use the zero-concentration blank values if available
+        blank_conc_0_idx = 0  # Assume blank only has one concentration (zero)
+
+        # Handle case where blank is None
+        if blank is not None:
+            blank_measurement = blank.get_data(measurement, 'time_series')
+            blank_od = blank.get_data(od_measurement, 'time_series')
+        else:
+            blank_measurement = None
+            blank_od = None
+
+        # Check if blank data is available
+        has_blank_data = blank_measurement is not None and blank_od is not None
+
+        if has_blank_data:
+            # If blank has multiple concentrations, use the first (usually zero)
+            if len(blank_measurement.shape) == 2:
+                blank_measurement = blank_measurement[:, blank_conc_0_idx]
+                blank_od = blank_od[:, blank_conc_0_idx]
+
+        for well in wells:
+            # Get raw well data
+            well_measurement = well.time_series.get(measurement)
+            well_od = well.time_series.get(od_measurement)
+
+            if well_measurement is None or well_od is None:
+                raise ValueError(f"Missing measurement or OD data in well {well.well_id}")
+
+            # Blank subtract if available, otherwise use raw data
+            if has_blank_data:
+                measurement_to_normalize = well_measurement - blank_measurement
+                od_to_normalize = well_od - blank_od
+            else:
+                measurement_to_normalize = well_measurement
+                od_to_normalize = well_od
+
+            # Normalize: measurement / (alpha + OD)
+            normalized = measurement_to_normalize / (alpha + od_to_normalize)
+            normalized_values.append(normalized)
+
+        return np.array(normalized_values)
+
+    def calculate_fold_change_statistics(self, data_attribute: str = 'fold_change',
+                                        error_type: str = 'std') -> None:
+        """
+        Calculate mean and error of a stored data attribute across replicates.
+
+        For each sample, groups the data attribute (e.g., fold_change) by concentration
+        and calculates mean and standard error across replicates.
+
+        Parameters
+        ----------
+        data_attribute : str, default 'fold_change'
+            Name of the attribute to calculate statistics for
+            (e.g., 'fold_change', 'blank_subtracted_timeseries', 'normalized_timeseries')
+        error_type : str, default 'std'
+            Type of error: 'std' or 'sem'
+        """
+        for sample in self.samples.values():
+            if not hasattr(sample, data_attribute):
+                continue
+
+            data = getattr(sample, data_attribute)
+            if data is None or (isinstance(data, dict) and not data) or \
+               (hasattr(data, 'empty') and data.empty):
+                continue
+
+            # Initialize storage
+            if not hasattr(sample, f'{data_attribute}_mean'):
+                setattr(sample, f'{data_attribute}_mean', {})
+            if not hasattr(sample, f'{data_attribute}_error'):
+                setattr(sample, f'{data_attribute}_error', {})
+
+            mean_dict = getattr(sample, f'{data_attribute}_mean')
+            error_dict = getattr(sample, f'{data_attribute}_error')
+
+            # Handle pandas DataFrame format (from fold_change)
+            if hasattr(data, 'index') and hasattr(data, 'columns'):
+                for concentration in data.index.get_level_values('concentration').unique():
+                    conc_data = data.loc[concentration].values
+                    mean_dict[concentration] = np.mean(conc_data, axis=0)
+
+                    if error_type == 'std':
+                        error_dict[concentration] = np.std(conc_data, axis=0, ddof=1)
+                    elif error_type == 'sem':
+                        n_replicates = conc_data.shape[0]
+                        error_dict[concentration] = np.std(conc_data, axis=0, ddof=1) / np.sqrt(n_replicates)
+
+            # Handle dict of numpy arrays format
+            elif isinstance(data, dict):
+                for measurement_type, data_array in data.items():
+                    if data_array is not None and len(data_array.shape) == 2:
+                        mean_dict[measurement_type] = np.mean(data_array, axis=1)
+
+                        if error_type == 'std':
+                            error_dict[measurement_type] = np.std(data_array, axis=1, ddof=1)
+                        elif error_type == 'sem':
+                            n_replicates = data_array.shape[1]
+                            error_dict[measurement_type] = np.std(data_array, axis=1, ddof=1) / np.sqrt(n_replicates)
+
+    def plot_fold_change_dose_response(self, timepoint_idx: int,
+                                       sample_ids: Optional[List[str]] = None,
+                                       x_logscale: bool = True,
+                                       y_logscale: bool = True,
+                                       figsize: Optional[Tuple[int, int]] = None,
+                                       title: Optional[str] = None,
+                                       ylabel: str = "Fold Change",
+                                       xlabel: str = "Concentration",
+                                       concentration_idx_range: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot dose-response curve: fold change vs concentration at a specific timepoint.
+
+        Parameters
+        ----------
+        timepoint_idx : int
+            Index of the timepoint to plot (0-based)
+        sample_ids : List[str], optional
+            List of sample IDs to plot. If None, plots all test samples.
+        x_logscale : bool, default True
+            If True, use log scale for x-axis (concentration)
+        y_logscale : bool, default True
+            If True, use log scale for y-axis (fold change)
+        figsize : Tuple[int, int], optional
+            Figure size (width, height) in inches
+        title : str, optional
+            Figure title. If None, auto-generates based on timepoint index
+        ylabel : str, default "Fold Change"
+            Y-axis label
+        xlabel : str, default "Concentration"
+            X-axis label
+        concentration_idx_range : Tuple[int, int], optional
+            Tuple of (start_idx, end_idx) to plot only a range of concentrations (0-based indices).
+            If None, plots all non-zero concentrations.
+
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects
+
+        Raises
+        ------
+        ValueError
+            If sample_ids are invalid or fold_change data not found
+        IndexError
+            If timepoint_idx is out of range
+        """
+        if not sample_ids:
+            sample_ids = self.get_test_samples()
+
+        if not sample_ids:
+            raise ValueError("No test samples found")
+
+        # Validate sample IDs
+        for sid in sample_ids:
+            if sid not in self.samples:
+                raise ValueError(f"Sample ID '{sid}' not found")
+
+        # Create figure
+        if figsize is None:
+            figsize = (10, 6)
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Set title
+        if title is None:
+            title = f"Dose-Response Curve at Timepoint {timepoint_idx}"
+        ax.set_title(title, fontsize=14, fontweight='bold')
+
+        # Plot data for each sample
+        colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
+
+        for color_idx, sample_id in enumerate(sample_ids):
+            sample = self.samples[sample_id]
+
+            if not hasattr(sample, 'fold_change_mean'):
+                print(f"Warning: No fold_change_mean data for {sample_id}")
+                continue
+
+            mean_dict = sample.fold_change_mean
+            error_dict = sample.fold_change_error
+
+            # Get concentrations (sorted, excluding 0.0 since we already normalized by it)
+            all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
+
+            if not all_concentrations:
+                print(f"Warning: No non-zero concentrations for {sample_id}")
+                continue
+
+            # Apply concentration range filter if specified
+            if concentration_idx_range is not None:
+                start_idx, end_idx = concentration_idx_range
+                concentrations = all_concentrations[start_idx:end_idx+1]
+            else:
+                concentrations = all_concentrations
+
+            if not concentrations:
+                print(f"Warning: No concentrations in specified range for {sample_id}")
+                continue
+
+            # Extract values at the specified timepoint
+            fold_changes = []
+            errors = []
+
+            for conc in concentrations:
+                mean_array = mean_dict[conc]
+                error_array = error_dict[conc]
+
+                # Get value at the specified timepoint
+                if timepoint_idx >= len(mean_array):
+                    raise IndexError(f"Timepoint index {timepoint_idx} out of range (max {len(mean_array)-1})")
+
+                fold_changes.append(mean_array[timepoint_idx])
+                errors.append(error_array[timepoint_idx])
+
+            # Plot line with error bars
+            ax.errorbar(concentrations, fold_changes, yerr=errors,
+                       marker='o', linestyle='-', linewidth=2, markersize=8,
+                       capsize=5, capthick=2, label=sample_id, color=colors[color_idx])
+
+        # Set axis scales
+        if x_logscale:
+            ax.set_xscale('log')
+
+        if y_logscale:
+            ax.set_yscale('log')
+
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(loc='best', fontsize=11)
+
+        plt.tight_layout()
+        return fig, ax
+
+    def get_fold_change_dataframes(self, sample_ids: Optional[List[str]] = None,
+                                  data_attribute: str = 'fold_change') -> Tuple['pd.DataFrame', 'pd.DataFrame']:
+        """
+        Get fold change data as two DataFrames: one for means, one for standard deviations.
+
+        Parameters
+        ----------
+        sample_ids : List[str], optional
+            List of sample IDs to include. If None, includes all test samples.
+        data_attribute : str, default 'fold_change'
+            Name of the attribute to extract (e.g., 'fold_change', 'blank_subtracted_timeseries')
+
+        Returns
+        -------
+        Tuple[pd.DataFrame, pd.DataFrame]
+            - Mean DataFrame: rows = samples, columns = concentrations
+            - Std dev DataFrame: rows = samples, columns = concentrations
+            Each cell contains an array of values across timepoints
+
+        Raises
+        ------
+        ValueError
+            If sample_ids are invalid or data attribute not found
+        """
+        import pandas as pd
+
+        if not sample_ids:
+            sample_ids = self.get_test_samples()
+
+        if not sample_ids:
+            raise ValueError("No test samples found")
+
+        # Validate sample IDs
+        for sid in sample_ids:
+            if sid not in self.samples:
+                raise ValueError(f"Sample ID '{sid}' not found")
+
+        # Collect all concentrations across samples
+        all_concentrations = set()
+        for sample_id in sample_ids:
+            sample = self.samples[sample_id]
+            mean_attr = f'{data_attribute}_mean'
+            if hasattr(sample, mean_attr):
+                mean_dict = getattr(sample, mean_attr)
+                all_concentrations.update(mean_dict.keys())
+
+        concentrations = sorted(all_concentrations)
+
+        # Build DataFrames
+        mean_data = {}
+        std_data = {}
+
+        for sample_id in sample_ids:
+            sample = self.samples[sample_id]
+            mean_attr = f'{data_attribute}_mean'
+            error_attr = f'{data_attribute}_error'
+
+            if not hasattr(sample, mean_attr):
+                raise ValueError(f"No {mean_attr} data found for {sample_id}")
+
+            mean_dict = getattr(sample, mean_attr)
+            error_dict = getattr(sample, error_attr)
+
+            mean_row = []
+            std_row = []
+
+            for conc in concentrations:
+                mean_row.append(mean_dict.get(conc, np.nan))
+                std_row.append(error_dict.get(conc, np.nan))
+
+            mean_data[sample_id] = mean_row
+            std_data[sample_id] = std_row
+
+        # Create DataFrames
+        df_mean = pd.DataFrame(mean_data, index=concentrations).T
+        df_std = pd.DataFrame(std_data, index=concentrations).T
+
+        # Rename columns to concentration labels
+        df_mean.columns = [f"C_{c}" for c in concentrations]
+        df_std.columns = [f"C_{c}" for c in concentrations]
+
+        return df_mean, df_std
 
     def _detect_measurement_types(self) -> List[str]:
         """Auto-detect available measurement types from wells."""
@@ -205,88 +780,6 @@ class SampleFrame:
                 measurement_types.update(well.get_available_measurements())
 
         return list(measurement_types)
-
-    def calculate_blanked_data(self, blank_sample_id: Optional[str] = None,
-                             measurement_types: Optional[List[str]] = None):
-        """
-        Calculate blank-subtracted data for all samples.
-
-        Parameters
-        ----------
-        blank_sample_id : str, optional
-            Sample ID to use as blank. If None, auto-detects blank samples.
-        measurement_types : List[str], optional
-            Measurement types to process. If None, processes all available.
-        """
-        # Find blank sample
-        blank_sample = None
-        if blank_sample_id is not None:
-            blank_sample = self.samples.get(blank_sample_id)
-        else:
-            # Auto-detect blank sample
-            for sample in self.samples.values():
-                if sample.is_blank:
-                    blank_sample = sample
-                    break
-
-        if blank_sample is None:
-            print("Warning: No blank sample found for background subtraction")
-            return
-
-        # Calculate blanked data for all non-blank samples
-        for sample in self.samples.values():
-            if not sample.is_blank:
-                sample.calculate_blanked_data(blank_sample, measurement_types)
-
-    def calculate_normalized_data(self, od_measurement: str = 'OD600',
-                                offset: float = 0.01,
-                                measurement_types: Optional[List[str]] = None):
-        """
-        Calculate normalized data for all samples.
-
-        Parameters
-        ----------
-        od_measurement : str, default 'OD600'
-            OD measurement type to use for normalization
-        offset : float, default 0.01
-            Offset added to OD to avoid division by zero
-        measurement_types : List[str], optional
-            Measurement types to normalize. If None, processes all available.
-        """
-        for sample in self.samples.values():
-            sample.calculate_normalized_data(od_measurement, offset, measurement_types)
-
-    def process_all_data(self, measurement_types: Optional[List[str]] = None,
-                        error_type: str = 'std',
-                        blank_sample_id: Optional[str] = None,
-                        od_measurement: str = 'OD600',
-                        normalization_offset: float = 0.01):
-        """
-        Complete data processing pipeline: statistics -> blanking -> normalization.
-
-        Parameters
-        ----------
-        measurement_types : List[str], optional
-            Measurement types to process
-        error_type : str, default 'std'
-            Error type for statistics calculation
-        blank_sample_id : str, optional
-            Sample ID to use as blank
-        od_measurement : str, default 'OD600'
-            OD measurement for normalization
-        normalization_offset : float, default 0.01
-            Offset for normalization calculation
-        """
-        print("Step 1: Calculating replicate statistics...")
-        self.calculate_all_statistics(measurement_types, error_type)
-
-        print("Step 2: Calculating blanked data...")
-        self.calculate_blanked_data(blank_sample_id, measurement_types)
-
-        print("Step 3: Calculating normalized data...")
-        self.calculate_normalized_data(od_measurement, normalization_offset, measurement_types)
-
-        print("✓ Data processing complete!")
 
     def get_sample_list(self) -> List[str]:
         """Get list of all sample IDs."""
@@ -380,7 +873,8 @@ class SampleFrame:
                                    figsize: Optional[Tuple[int, int]] = None,
                                    title: Optional[str] = None,
                                    ylabel: Optional[str] = None,
-                                   xlabel: str = "Time (hours)") -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
+                                   xlabel: str = "Time (hours)",
+                                   sharey: bool = True) -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
         """
         Plot time series curves for replicates of samples at each concentration.
 
@@ -473,15 +967,32 @@ class SampleFrame:
             for well in sample.wells:
                 if not well.is_excluded() and measurement in well.time_series:
                     conc = well.concentration
+                    # Create a unique key that includes well position to avoid concentration collisions
+                    # This ensures wells from different rows don't get merged
                     if conc not in conc_groups:
                         conc_groups[conc] = []
                     conc_groups[conc].append(well)
 
-            # Add to subplot data
+            # Add to subplot data, deduplicating wells by their object identity
             for conc, wells in conc_groups.items():
                 if wells:  # Only if we have wells
-                    key = (sample_id, conc)
-                    subplot_data[key] = wells
+                    # Deduplicate: keep only unique well objects (same object shouldn't appear twice)
+                    seen_wells = {}
+                    unique_wells = []
+                    for well in wells:
+                        well_key = id(well)  # Use object identity to detect duplicates
+                        if well_key not in seen_wells:
+                            seen_wells[well_key] = True
+                            unique_wells.append(well)
+
+                    if unique_wells:  # Only add if we have unique wells after deduplication
+                        key = (sample_id, conc)
+                        subplot_data[key] = unique_wells
+
+                        # Debug: Print well positions for verification
+                        well_positions = [f"{w.well_id}" for w in unique_wells]
+                        # Uncomment below to debug well grouping
+                        #print(f"DEBUG: {sample_id} @ conc {conc}: {well_positions}")
 
         if not subplot_data:
             raise ValueError("No wells found with valid data")
@@ -505,7 +1016,7 @@ class SampleFrame:
             n_cols = max(2, min(n_cols, 8))
             n_rows = int(np.ceil(n_subplots / n_cols))
 
-        fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False)
+        fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False, sharey=sharey)
         axes_flat = axes_array.flatten()
 
         # Set overall title
@@ -517,14 +1028,14 @@ class SampleFrame:
         axes_dict = {}
 
         # Define colors for different samples
-        colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
-        color_map = {sid: colors[i] for i, sid in enumerate(sample_ids)}
+        #colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
+        #color_map = {sid: colors[i] for i, sid in enumerate(sample_ids)}
 
         # Plot for each (sample, concentration) combination
         for subplot_idx, (sample_id, conc) in enumerate(sorted_keys):
             ax = axes_flat[subplot_idx]
             wells = subplot_data[(sample_id, conc)]
-            color = color_map[sample_id]
+            #color = color_map[sample_id]
 
             # Get time points from first valid well
             time = None
@@ -540,8 +1051,10 @@ class SampleFrame:
             for well in wells:
                 if measurement in well.time_series:
                     replicate_data = well.time_series[measurement]
-                    ax.plot(time, replicate_data, '-', color=color, alpha=0.6,
-                           linewidth=1.5, label=well.well_id, zorder=2)
+                    # Use plate_id for label if available, otherwise fall back to well_id
+                    label = getattr(well, 'plate_id', well.well_id)
+                    ax.plot(time, replicate_data, '-', alpha=0.6,
+                           linewidth=1.5, label=label, zorder=2)
 
             # Optionally overlay mean and error band
             if show_mean:
@@ -551,14 +1064,14 @@ class SampleFrame:
                 error_data = np.std(replicate_arrays, axis=1)
 
                 # Plot mean
-                ax.plot(time, mean_data, 'o-', color=color, linewidth=2.5,
+                ax.plot(time, mean_data, 'o-', linewidth=2.5,
                        markersize=6, label=f"{sample_id} mean", zorder=3)
 
                 # Add error band
                 ax.fill_between(time,
                                mean_data - error_data,
                                mean_data + error_data,
-                               alpha=0.15, color=color, zorder=1)
+                               alpha=0.15, zorder=1)
 
             # Format subplot
             ax.set_xlabel(xlabel, fontsize=10)
@@ -567,12 +1080,272 @@ class SampleFrame:
             ax.grid(True, alpha=0.3, linestyle='--')
             ax.legend(loc='best', fontsize=8)
 
-            # Set reasonable axis limits
-            ax.set_ylim(bottom=0)
-            ax.margins(0.05)
+    def calculate_hill_fits(self, timepoint_idx: int,
+                           sample_ids: Optional[List[str]] = None,
+                           concentration_idx_range: Optional[Tuple[int, int]] = None) -> Dict[str, Dict[str, float]]:
+        """
+        Fit dose-response data at a specific timepoint to a Hill function.
 
-            # Store in dictionary
-            axes_dict[f"{sample_id}_{conc}"] = ax
+        Parameters
+        ----------
+        timepoint_idx : int
+            Index of the timepoint to fit (0-based)
+        sample_ids : List[str], optional
+            List of sample IDs to fit. If None, fits all test samples.
+        concentration_idx_range : Tuple[int, int], optional
+            Tuple of (start_idx, end_idx) to fit only a range of concentrations (0-based indices).
+            If None, fits all non-zero concentrations.
+
+        Returns
+        -------
+        Dict[str, Dict[str, float]]
+            Dictionary mapping sample_id to fit parameters:
+            - 'ec50': EC50 concentration value
+            - 'hill': Hill coefficient
+            - 'min': Minimum response
+            - 'max': Maximum response
+            - 'r_squared': R-squared goodness of fit
+
+        Raises
+        ------
+        ImportError
+            If scipy is not available
+        ValueError
+            If sample_ids are invalid or insufficient data points
+        """
+        from scipy.optimize import curve_fit
+
+        if not sample_ids:
+            sample_ids = self.get_test_samples()
+
+        if not sample_ids:
+            raise ValueError("No test samples found")
+
+        def hill_function(conc, ec50, hill, min_val, max_val):
+            """Hill equation: response = min + (max - min) * conc^hill / (ec50^hill + conc^hill)"""
+            return min_val + (max_val - min_val) * (conc ** hill) / (ec50 ** hill + conc ** hill)
+
+        fit_results = {}
+
+        for sample_id in sample_ids:
+            if sample_id not in self.samples:
+                print(f"Warning: Sample ID '{sample_id}' not found")
+                continue
+
+            sample = self.samples[sample_id]
+
+            if not hasattr(sample, 'fold_change_mean'):
+                print(f"Warning: No fold_change_mean data for {sample_id}")
+                continue
+
+            mean_dict = sample.fold_change_mean
+
+            # Get concentrations
+            all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
+
+            if concentration_idx_range is not None:
+                start_idx, end_idx = concentration_idx_range
+                concentrations = all_concentrations[start_idx:end_idx+1]
+            else:
+                concentrations = all_concentrations
+
+            if len(concentrations) < 3:
+                print(f"Warning: Insufficient data points for {sample_id} (need >= 3)")
+                continue
+
+            # Extract fold change values at timepoint
+            fold_changes = []
+            for conc in concentrations:
+                mean_array = mean_dict[conc]
+                if timepoint_idx >= len(mean_array):
+                    raise IndexError(f"Timepoint index {timepoint_idx} out of range")
+                fold_changes.append(mean_array[timepoint_idx])
+
+            fold_changes = np.array(fold_changes)
+            concentrations = np.array(concentrations)
+
+            try:
+                # Initial parameter guesses
+                min_val = np.min(fold_changes)
+                max_val = np.max(fold_changes)
+                ec50_guess = np.median(concentrations)
+
+                popt, _ = curve_fit(hill_function, concentrations, fold_changes,
+                                   p0=[ec50_guess, 1.0, min_val, max_val],
+                                   maxfev=5000)
+
+                ec50, hill, min_fit, max_fit = popt
+
+                # Calculate R-squared
+                y_pred = hill_function(concentrations, *popt)
+                ss_res = np.sum((fold_changes - y_pred) ** 2)
+                ss_tot = np.sum((fold_changes - np.mean(fold_changes)) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+
+                fit_results[sample_id] = {
+                    'ec50': float(ec50),
+                    'hill': float(hill),
+                    'min': float(min_fit),
+                    'max': float(max_fit),
+                    'r_squared': float(r_squared)
+                }
+            except Exception as e:
+                print(f"Warning: Hill fit failed for {sample_id}: {e}")
+                continue
+
+        # Store results on samples
+        for sample_id, params in fit_results.items():
+            if sample_id in self.samples:
+                self.samples[sample_id].hill_fit_params = params
+
+        return fit_results
+
+    def plot_dose_response_with_hill_fit(self, timepoint_idx: int,
+                                         sample_ids: Optional[List[str]] = None,
+                                         x_logscale: bool = True,
+                                         y_logscale: bool = True,
+                                         figsize: Optional[Tuple[int, int]] = None,
+                                         title: Optional[str] = None,
+                                         ylabel: str = "Fold Change",
+                                         xlabel: str = "Concentration",
+                                         concentration_idx_range: Optional[Tuple[int, int]] = None,
+                                         num_points: int = 100) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Plot dose-response curve with Hill function fit overlay.
+
+        Parameters
+        ----------
+        timepoint_idx : int
+            Index of the timepoint to plot (0-based)
+        sample_ids : List[str], optional
+            List of sample IDs to plot. If None, plots all test samples.
+        x_logscale : bool, default True
+            If True, use log scale for x-axis (concentration)
+        y_logscale : bool, default True
+            If True, use log scale for y-axis (fold change)
+        figsize : Tuple[int, int], optional
+            Figure size (width, height) in inches
+        title : str, optional
+            Figure title. If None, auto-generates based on timepoint index
+        ylabel : str, default "Fold Change"
+            Y-axis label
+        xlabel : str, default "Concentration"
+            X-axis label
+        concentration_idx_range : Tuple[int, int], optional
+            Tuple of (start_idx, end_idx) to plot only a range of concentrations (0-based indices).
+        num_points : int, default 100
+            Number of points for the fitted curve
+
+        Returns
+        -------
+        Tuple[plt.Figure, plt.Axes]
+            Figure and axes objects
+        """
+        # First, calculate Hill fits
+        fit_results = self.calculate_hill_fits(timepoint_idx, sample_ids, concentration_idx_range)
+
+        if not sample_ids:
+            sample_ids = self.get_test_samples()
+
+        if not sample_ids:
+            raise ValueError("No test samples found")
+
+        # Create figure
+        if figsize is None:
+            figsize = (12, 7)
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Set title
+        if title is None:
+            title = f"Dose-Response Curve (Hill Fit) at Timepoint {timepoint_idx}"
+        ax.set_title(title, fontsize=14, fontweight='bold')
+
+        def hill_function(conc, ec50, hill, min_val, max_val):
+            return min_val + (max_val - min_val) * (conc ** hill) / (ec50 ** hill + conc ** hill)
+
+        colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
+
+        for color_idx, sample_id in enumerate(sample_ids):
+            sample = self.samples[sample_id]
+
+            if not hasattr(sample, 'fold_change_mean'):
+                print(f"Warning: No fold_change_mean data for {sample_id}")
+                continue
+
+            mean_dict = sample.fold_change_mean
+            error_dict = sample.fold_change_error
+
+            # Get concentrations
+            all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
+
+            if concentration_idx_range is not None:
+                start_idx, end_idx = concentration_idx_range
+                concentrations = all_concentrations[start_idx:end_idx+1]
+            else:
+                concentrations = all_concentrations
+
+            if not concentrations:
+                continue
+
+            # Extract values at timepoint
+            fold_changes = []
+            errors = []
+            for conc in concentrations:
+                mean_array = mean_dict[conc]
+                error_array = error_dict[conc]
+                if timepoint_idx >= len(mean_array):
+                    raise IndexError(f"Timepoint index {timepoint_idx} out of range")
+                fold_changes.append(mean_array[timepoint_idx])
+                errors.append(error_array[timepoint_idx])
+
+            # Plot data points
+            ax.errorbar(concentrations, fold_changes, yerr=errors,
+                       marker='o', linestyle='', linewidth=2, markersize=8,
+                       capsize=5, capthick=2, label=sample_id, color=colors[color_idx],
+                       alpha=0.7)
+
+            # Plot Hill fit curve if available
+            if sample_id in fit_results:
+                params = fit_results[sample_id]
+                ec50 = params['ec50']
+                hill = params['hill']
+                min_val = params['min']
+                max_val = params['max']
+                r_sq = params['r_squared']
+
+                # Create smooth curve
+                conc_min, conc_max = np.min(concentrations), np.max(concentrations)
+                if x_logscale:
+                    conc_smooth = np.logspace(np.log10(conc_min), np.log10(conc_max), num_points)
+                else:
+                    conc_smooth = np.linspace(conc_min, conc_max, num_points)
+
+                fc_smooth = hill_function(conc_smooth, ec50, hill, min_val, max_val)
+
+                ax.plot(conc_smooth, fc_smooth, '-', linewidth=2.5,
+                       color=colors[color_idx], alpha=0.9,
+                       label=f"{sample_id} fit (EC50={ec50:.2e}, n={hill:.2f}, R²={r_sq:.3f})")
+
+        # Set axis scales
+        if x_logscale:
+            ax.set_xscale('log')
+        if y_logscale:
+            ax.set_yscale('log')
+
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(loc='best', fontsize=10)
+
+        plt.tight_layout()
+        return fig, ax
+
+        # Set reasonable axis limits
+        ax.set_ylim(bottom=0)
+        ax.margins(0.05)
+
+        # Store in dictionary
+        axes_dict[f"{sample_id}_{conc}"] = ax
 
         # Hide unused subplots
         for idx in range(n_subplots, len(axes_flat)):
