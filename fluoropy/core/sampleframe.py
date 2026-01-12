@@ -252,10 +252,6 @@ class SampleFrame:
                 # This ensures concentrations stay in the original plate order
                 wells_sorted = sorted(wells, key=lambda w: (w.row, w.column))
 
-                # Debug: Print well details before creating Sample
-                #well_details = [(w.well_id, id(w)) for w in wells_sorted]
-                #print(f"DEBUG _init_samples: {sample_id} has {len(wells_sorted)} wells: {well_details}")
-
                 # Use the original sample_type from the wells for the Sample object
                 # (the sample_id might have plate identifier appended for controls)
                 original_sample_type = wells_sorted[0].sample_type
@@ -278,60 +274,79 @@ class SampleFrame:
 
         return wells
 
-    def calculate_read_timeseries_statistics(self, measurement_types: Optional[List[str]] = None) -> None:
+    def _calculate_data_statistics(self, sample: 'Sample', data_source: str,
+                                  measurements: Optional[List[str]] = None,
+                                  error_type: str = 'std') -> None:
         """
-        Calculate mean and error of raw read time series for each sample.
+        Helper method to calculate mean and error statistics for a data source.
 
-        For each sample and measurement type, computes the mean and standard error
-        across replicates for the raw time series data.
-
-        Stores results as:
-        - sample.time_series_mean: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
-        - sample.time_series_error: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+        Extracts the logic common to calculating statistics for any 3D data array
+        (n_timepoints, n_replicates, n_concentrations).
 
         Parameters
         ----------
-        measurement_types : List[str], optional
-            Measurement types to calculate statistics for. If None, processes all available.
+        sample : Sample
+            Sample object to calculate statistics for
+        data_source : str
+            Name of the data source attribute (e.g., 'blanked_data', 'normalized_data')
+        measurements : List[str], optional
+            Measurement types to process. If None, uses all available in data_source
+        error_type : str, default 'std'
+            Type of error: 'std' (standard deviation) or 'sem' (standard error of mean)
         """
-        if measurement_types is None:
-            measurement_types = self._detect_measurement_types()
+        # Get the data dictionary from the sample
+        data_dict = getattr(sample, data_source, {})
+        if not data_dict:
+            return
 
-        for sample in self.samples.values():
-            # Initialize storage dictionaries
-            if not hasattr(sample, 'time_series_mean'):
-                sample.time_series_mean = {}
-            if not hasattr(sample, 'time_series_error'):
-                sample.time_series_error = {}
+        # Determine which measurements to process
+        if measurements is None:
+            measurements_to_process = list(data_dict.keys())
+        else:
+            measurements_to_process = [m for m in measurements if m in data_dict]
 
-            for measurement in measurement_types:
-                # Collect replicate data for this measurement
-                replicate_data = []
+        # Initialize storage dictionaries for means and errors
+        mean_attr = f"{data_source.replace('_data', '')}_mean"
+        error_attr = f"{data_source.replace('_data', '')}_error"
 
-                for well in sample.wells:
-                    if well.is_excluded():
-                        continue
-                    data = well.time_series.get(measurement)
-                    if data is not None:
-                        replicate_data.append(data)
+        if not hasattr(sample, mean_attr):
+            setattr(sample, mean_attr, {})
+        if not hasattr(sample, error_attr):
+            setattr(sample, error_attr, {})
 
-                if replicate_data:
-                    # Stack replicate data into array of shape (n_replicates, n_timepoints)
-                    data_array = np.array(replicate_data)
+        mean_dict = getattr(sample, mean_attr)
+        error_dict = getattr(sample, error_attr)
 
-                    # Calculate mean and standard error across replicates (axis=0)
-                    mean = np.mean(data_array, axis=0)
-                    sem = np.std(data_array, axis=0, ddof=1) / np.sqrt(data_array.shape[0])
+        # Calculate statistics for each measurement type
+        for measurement in measurements_to_process:
+            data = data_dict[measurement]
+            if data is None or data.size == 0:
+                continue
 
-                    sample.time_series_mean[measurement] = mean
-                    sample.time_series_error[measurement] = sem
+            # data shape is (n_timepoints, n_replicates, n_concentrations)
+            # Calculate mean and error across replicates (axis=1)
+            if len(data.shape) == 3:
+                mean = np.mean(data, axis=1)
+
+                if error_type == 'std':
+                    error = np.std(data, axis=1, ddof=1)
+                else:  # sem
+                    n_replicates = data.shape[1]
+                    error = np.std(data, axis=1, ddof=1) / np.sqrt(n_replicates)
+            else:
+                # Handle edge case of non-3D data
+                mean = data
+                error = np.zeros_like(data)
+
+            mean_dict[measurement] = mean
+            error_dict[measurement] = error
 
     def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None) -> None:
         """
         Calculate blank-subtracted time series data for individual samples.
 
         For each sample, subtracts the blank from the same media type and plate_id.
-        Stores result in sample.blank_subtracted_timeseries attribute.
+        Stores result in sample.blanked_data attribute.
 
         Parameters
         ----------
@@ -364,7 +379,45 @@ class SampleFrame:
 
             # Calculate blank-subtracted data
             sample.calculate_blanked_data(blank_sample, measurement_types)
-            sample.blank_subtracted_timeseries = sample.blanked_data
+
+    def calculate_blank_subtracted_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
+                                                         error_type: str = 'std') -> None:
+        """
+        Calculate mean and error of blank-subtracted timeseries for each sample
+        and stores in the sample.blanked_data_mean and sample.blanked_data_error attributes.
+
+        For each sample and measurement type, computes the mean and error (std
+        or sem) across replicates for the blank-subtracted timeseries data.
+
+        Parameters
+        ----------
+        measurement_types : List[str], optional
+            Measurement types to calculate statistics for. If None, processes all measurements
+            in blanked_data.
+        error_type : str, default 'std'
+            Type of error to calculate: 'std' (standard deviation) or 'sem' (standard error of mean)
+
+        Raises
+        ------
+        ValueError
+            If error_type is not 'std' or 'sem'
+        """
+        if error_type not in ('std', 'sem'):
+            raise ValueError(f"error_type must be 'std' or 'sem', got {error_type}")
+
+        for sample in self.samples.values():
+            if sample.is_blank:
+                continue
+
+            # Check if blanked data exists
+            if not hasattr(sample, 'blanked_data') or not sample.blanked_data:
+                print(f"Warning: No blank-subtracted timeseries data for {sample.sample_type}. "
+                      f"Call calculate_blank_subtracted_timeseries() first.")
+                continue
+
+            # Use helper method to calculate statistics
+            self._calculate_data_statistics(sample, 'blanked_data', measurement_types, error_type)
+
 
     def calculate_normalized_timeseries(self, od_measurement: str = 'OD600',
                                        alpha: float = 0.01,
@@ -399,7 +452,6 @@ class SampleFrame:
                       f"Call calculate_blank_subtracted_timeseries() first. "
                       f"Using raw data for normalization.")
                 sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
-                sample.normalized_timeseries = sample.normalized_data
 
     def calculate_normalized_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
                                                    error_type: str = 'std') -> None:
@@ -410,14 +462,14 @@ class SampleFrame:
         across replicates for the normalized timeseries data.
 
         Stores results as:
-        - sample.normalized_timeseries_mean: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
-        - sample.normalized_timeseries_error: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+        - sample.normalized_data_mean: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+        - sample.normalized_data_error: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
 
         Parameters
         ----------
         measurement_types : List[str], optional
             Measurement types to calculate statistics for. If None, processes all measurements
-            in normalized_timeseries.
+            in normalized_data.
         error_type : str, default 'std'
             Type of error to calculate: 'std' (standard deviation) or 'sem' (standard error of mean)
 
@@ -434,53 +486,17 @@ class SampleFrame:
                 continue
 
             # Check if normalized data exists
-            if not hasattr(sample, 'normalized_timeseries') or not sample.normalized_timeseries:
+            if not hasattr(sample, 'normalized_data') or not sample.normalized_data:
                 print(f"Warning: No normalized timeseries data for {sample.sample_type}. "
                       f"Call calculate_normalized_timeseries() first.")
                 continue
 
-            # Initialize storage dictionaries
-            if not hasattr(sample, 'normalized_timeseries_mean'):
-                sample.normalized_timeseries_mean = {}
-            if not hasattr(sample, 'normalized_timeseries_error'):
-                sample.normalized_timeseries_error = {}
-
-            # Determine which measurements to process
-            if measurement_types is None:
-                measurements_to_process = list(sample.normalized_timeseries.keys())
-            else:
-                measurements_to_process = [m for m in measurement_types
-                                           if m in sample.normalized_timeseries]
-
-            # Calculate statistics for each measurement type
-            for measurement in measurements_to_process:
-                data = sample.normalized_timeseries[measurement]
-
-                if data is None or data.size == 0:
-                    continue
-
-                # data shape is (n_timepoints, n_concentrations) or (n_timepoints,)
-                # Calculate mean and error across replicates (axis=1 for 2D, or axis=0 for 1D)
-                if len(data.shape) == 2:
-                    # Multi-concentration data: shape (n_timepoints, n_concentrations)
-                    mean = np.mean(data, axis=1)
-
-                    if error_type == 'std':
-                        error = np.std(data, axis=1, ddof=1)
-                    else:  # sem
-                        n_replicates = data.shape[1]
-                        error = np.std(data, axis=1, ddof=1) / np.sqrt(n_replicates)
-                else:
-                    # Single timeseries: shape (n_timepoints,)
-                    mean = data
-                    error = np.zeros_like(data)
-
-                sample.normalized_timeseries_mean[measurement] = mean
-                sample.normalized_timeseries_error[measurement] = error
+            # Use helper method to calculate statistics
+            self._calculate_data_statistics(sample, 'normalized_data', measurement_types, error_type)
 
     def calculate_fold_change(self, measurement: str,
-                            od_measurement: str = 'OD600',
-                            alpha: float = 0.01) -> None:
+                              od_measurement: str = 'OD600',
+                              alpha: float = 0.01) -> None:
         """
         Calculate log fold change of samples by negative control at each timepoint.
 
