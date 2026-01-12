@@ -9,34 +9,57 @@ from .well import Well
 
 class Sample:
     """
-    Represents a sample with replicate statistics calculated from multiple wells.
+    Represents a sample with multiple replicates.
 
-    This class stores calculated statistics (mean, std/sem) across replicate wells
-    of the same sample type. Data is organized in numpy arrays with:
-    - Rows: time points
-    - Columns: concentrations
+    This class stores:
+        1. Raw time series data from individual wells
+        2. Calculated statistics (mean, std/sem) across replicate wells
+        of the same sample type. Data is organized in numpy arrays with:
+            - Rows: time points
+            - Columns: concentrations
 
     Attributes:
     -----------
     time_series : Dict[str, np.ndarray]
-        Mean time series data for each measurement type
-        Shape: (n_timepoints, n_concentrations)
-
-    error : Dict[str, np.ndarray]
-        Error data (std or sem) for each measurement type
-        Shape: (n_timepoints, n_concentrations)
+        Raw individual replicate data for each measurement type
+        Shape: (n_timepoints, n_replicates, n_concentrations)
 
     time : np.ndarray
         Time points array
         Shape: (n_timepoints,)
 
+    time_series_mean : Dict[str, np.ndarray]
+        Mean time series data across replicates for each measurement type
+        Shape: (n_timepoints, n_concentrations)
+
+    time_series_error : Dict[str, np.ndarray]
+        Error (std/sem) across replicates for each measurement type
+        Shape: (n_timepoints, n_concentrations)
+
     blanked_data : Dict[str, np.ndarray]
-        Blank-subtracted data for each measurement type
+        Blank-subtracted raw data for each measurement type
+        Shape: (n_timepoints, n_replicates, n_concentrations)
+
+    blanked_data_mean : Dict[str, np.ndarray]
+        Mean blanked data across replicates for each measurement type
+        Shape: (n_timepoints, n_concentrations)
+
+    blanked_data_error : Dict[str, np.ndarray]
+        Error (std/sem) for blanked data across replicates for each measurement type
         Shape: (n_timepoints, n_concentrations)
 
     normalized_data : Dict[str, np.ndarray]
-        Normalized data: blanked_measurement / (offset + blanked_OD600)
+        Normalized raw data: blanked_measurement / (offset + blanked_OD600)
+        Shape: (n_timepoints, n_replicates, n_concentrations)
+
+    normalized_data_mean : Dict[str, np.ndarray]
+        Mean normalized data across replicates for each measurement type
         Shape: (n_timepoints, n_concentrations)
+
+    normalized_data_error : Dict[str, np.ndarray]
+        Error (std/sem) for normalized data across replicates for each measurement type
+        Shape: (n_timepoints, n_concentrations)
+
     """
 
     def __init__(self, sample_type: str, wells: Optional[List[Well]] = None):
@@ -54,20 +77,22 @@ class Sample:
         self.wells = wells or []
         self.plate_id = None  # Plate identifier if needed
 
-        # Core data structures
-        self.time_series: Dict[str, np.ndarray] = {}  # Mean data
-        self.error: Dict[str, np.ndarray] = {}        # Error data (std/sem)
+        # Core data structures - raw individual replicate data
+        self.time_series: Dict[str, np.ndarray] = {}  # Raw data {measurement_type: np.ndarray(n_timepoints, n_replicates, n_concentrations)}
         self.time: Optional[np.ndarray] = None        # Time points
         self.concentrations: Optional[np.ndarray] = None  # Concentration values
 
-        # Individual replicate time series (for each well)
-        # Format: {measurement_type: {concentration: [well_data_1, well_data_2, ...]}}
-        self.individual_time_series: Dict[str, Dict[float, List[np.ndarray]]] = {}
+        # Statistics derived from time_series
+        self.time_series_mean: Dict[str, np.ndarray] = {}  # Mean across replicates
+        self.time_series_error: Dict[str, np.ndarray] = {}  # Error (std/sem) across replicates
 
         # Processed data structures
-        self.blanked_data: Dict[str, np.ndarray] = {}      # Blank-subtracted
+        self.blanked_data: Dict[str, np.ndarray] = {}        # Blank-subtracted raw data
+        self.blanked_data_mean: Dict[str, np.ndarray] = {}   # Mean blanked data
         self.blanked_data_error: Dict[str, np.ndarray] = {}  # Error for blanked data
-        self.normalized_data: Dict[str, np.ndarray] = {}   # Normalized
+
+        self.normalized_data: Dict[str, np.ndarray] = {}   # Normalized raw data
+        self.normalized_data_mean: Dict[str, np.ndarray] = {}  # Mean normalized data
         self.normalized_data_error: Dict[str, np.ndarray] = {}  # Error for normalized data
 
         # Metadata
@@ -83,6 +108,7 @@ class Sample:
         # Initialize from wells if provided
         if wells:
             self._initialize_from_wells()
+            self._populate_time_series()
 
     def __repr__(self) -> str:
         """String representation of the sample."""
@@ -107,6 +133,75 @@ class Sample:
         # Set time points from first well
         if first_well.time_points is not None:
             self.time = first_well.time_points.copy()
+
+    def _populate_time_series(self, measurement_types: Optional[List[str]] = None):
+        """
+        Populate time_series with raw individual replicate data organized by concentration.
+
+        This method populates self.time_series with raw data from each well, organized as:
+        {measurement_type: np.ndarray of shape (n_timepoints, n_replicates, n_concentrations)}
+
+        Parameters
+        ----------
+        measurement_types : List[str], optional
+            Measurement types to extract. If None, extracts all available measurements.
+        """
+        if not self.wells:
+            return
+
+        if measurement_types is None:
+            measurement_types = self.get_measurement_types()
+
+        # Clear existing data
+        self.time_series.clear()
+
+        for measurement_type in measurement_types:
+            # Group wells by concentration
+            concentration_groups = {}
+            for well in self.wells:
+                if well.is_excluded():
+                    continue
+
+                measurement_data = well.get_measurement(measurement_type)
+                if measurement_data is None:
+                    continue
+
+                conc = well.concentration if well.concentration is not None else 0.0
+                if conc not in concentration_groups:
+                    concentration_groups[conc] = []
+                concentration_groups[conc].append(measurement_data)
+
+            # Build array for this measurement type if we have data
+            if not concentration_groups:
+                continue
+
+            # Determine dimensions
+            n_timepoints = None
+            for data_list in concentration_groups.values():
+                if data_list:
+                    n_timepoints = len(data_list[0])
+                    break
+
+            if n_timepoints is None:
+                continue
+
+            # Sort concentrations for consistent ordering
+            sorted_concentrations = sorted(concentration_groups.keys())
+            n_concentrations = len(sorted_concentrations)
+
+            # Find max replicates per concentration to handle uneven data
+            max_replicates = max(len(data_list) for data_list in concentration_groups.values())
+
+            # Build 3D array: (n_timepoints, n_replicates, n_concentrations)
+            time_series_array = np.full((n_timepoints, max_replicates, n_concentrations), np.nan)
+
+            # Populate array
+            for conc_idx, concentration in enumerate(sorted_concentrations):
+                data_list = concentration_groups[concentration]
+                for rep_idx, data in enumerate(data_list):
+                    time_series_array[:, rep_idx, conc_idx] = data
+
+            self.time_series[measurement_type] = time_series_array
 
     def add_well(self, well: Well):
         """
@@ -324,15 +419,17 @@ class Sample:
         # This ensures get_concentrations() always returns the same order as time series columns
         self._timeseries_concentration_order = self.concentrations.copy()
 
-        # Clear existing data to ensure clean recalculation
-        self.time_series.clear()
-        self.error.clear()
+        # Clear existing derived data to ensure clean recalculation
+        self.time_series_mean.clear()
+        self.time_series_error.clear()
         self.n_replicates.clear()
 
         # Also clear derived data that depends on concentrations
         self.blanked_data.clear()
+        self.blanked_data_mean.clear()
         self.blanked_data_error.clear()
         self.normalized_data.clear()
+        self.normalized_data_mean.clear()
         self.normalized_data_error.clear()
 
         # Process each measurement type
@@ -340,109 +437,46 @@ class Sample:
             self._calculate_measurement_statistics(measurement_type, error_type)
 
     def _calculate_measurement_statistics(self, measurement_type: str, error_type: str = 'std'):
-        """Calculate statistics for a specific measurement type."""
+        """Calculate statistics for a specific measurement type from raw time series data."""
+        if measurement_type not in self.time_series:
+            return
+
+        # Get raw time series data: (n_timepoints, n_replicates, n_concentrations)
+        raw_data = self.time_series[measurement_type]
+        n_timepoints, n_replicates, n_concentrations = raw_data.shape
         concentrations = self.concentrations
-        n_concentrations = len(concentrations)
 
-        # Group wells by concentration
-        concentration_groups = {conc: [] for conc in concentrations}
-
-        for well in self.wells:
-            if well.is_excluded():
-                continue
-
-            measurement_data = well.get_measurement(measurement_type)
-            if measurement_data is None:
-                continue
-
-            well_conc = well.concentration if well.concentration is not None else 0.0
-            if well_conc in concentration_groups:
-                concentration_groups[well_conc].append(measurement_data)
-
-        # Calculate statistics for each concentration
-        if not any(concentration_groups.values()):
-            return
-
-        # Determine time series length from first available data
-        n_timepoints = None
-        for data_list in concentration_groups.values():
-            if data_list:
-                n_timepoints = len(data_list[0])
-                break
-
-        if n_timepoints is None:
-            return
-
-        # Initialize arrays
+        # Initialize arrays for statistics
         mean_array = np.full((n_timepoints, n_concentrations), np.nan)
         error_array = np.full((n_timepoints, n_concentrations), np.nan)
 
         # Calculate statistics for each concentration
         for conc_idx, concentration in enumerate(concentrations):
-            data_list = concentration_groups[concentration]
+            # Extract data for this concentration across all replicates
+            conc_data = raw_data[:, :, conc_idx]  # shape: (n_timepoints, n_replicates)
 
-            if not data_list:
-                continue
+            # Calculate mean (ignoring NaN values)
+            mean_array[:, conc_idx] = np.nanmean(conc_data, axis=1)
 
-            # Stack data from all replicates
-            data_matrix = np.column_stack(data_list)  # shape: (timepoints, replicates)
-
-            # Calculate mean and error
-            mean_array[:, conc_idx] = np.mean(data_matrix, axis=1)
-
+            # Calculate error
             if error_type == 'std':
-                error_array[:, conc_idx] = np.std(data_matrix, axis=1, ddof=1)
+                error_array[:, conc_idx] = np.nanstd(conc_data, axis=1, ddof=1)
             elif error_type == 'sem':
-                error_array[:, conc_idx] = np.std(data_matrix, axis=1, ddof=1) / np.sqrt(data_matrix.shape[1])
+                # Count valid (non-NaN) values for each timepoint
+                valid_count = np.sum(~np.isnan(conc_data), axis=1)
+                error_array[:, conc_idx] = np.nanstd(conc_data, axis=1, ddof=1) / np.sqrt(valid_count)
 
-            # Store replicate count
-            self.n_replicates[f"{measurement_type}_{concentration}"] = len(data_list)
+            # Store replicate count (count non-NaN values)
+            valid_replicates = np.sum(~np.isnan(conc_data), axis=0)
+            if len(valid_replicates) > 0:
+                self.n_replicates[f"{measurement_type}_{concentration}"] = int(np.max(valid_replicates))
 
         # Store results
-        self.time_series[measurement_type] = mean_array
-        self.error[measurement_type] = error_array
-
-    def populate_individual_time_series(self, measurement_types: Optional[List[str]] = None):
-        """
-        Populate individual_time_series with raw data from each well.
-
-        Stores individual replicate data organized by measurement type and concentration.
-        Format: {measurement_type: {concentration: [replicate_1_data, replicate_2_data, ...]}}
-
-        Parameters
-        ----------
-        measurement_types : List[str], optional
-            Measurement types to extract. If None, extracts all available measurements.
-        """
-        if measurement_types is None:
-            measurement_types = self.get_measurement_types()
-
-        self.individual_time_series.clear()
-
-        for measurement_type in measurement_types:
-            self.individual_time_series[measurement_type] = {}
-
-            # Group wells by concentration
-            concentration_groups = {}
-            for well in self.wells:
-                if well.is_excluded():
-                    continue
-
-                measurement_data = well.get_measurement(measurement_type)
-                if measurement_data is None:
-                    continue
-
-                conc = well.concentration if well.concentration is not None else 0.0
-                if conc not in concentration_groups:
-                    concentration_groups[conc] = []
-                concentration_groups[conc].append(measurement_data)
-
-            # Store data for each concentration
-            for conc, data_list in concentration_groups.items():
-                self.individual_time_series[measurement_type][conc] = data_list
+        self.time_series_mean[measurement_type] = mean_array
+        self.time_series_error[measurement_type] = error_array
 
     def get_individual_replicate_data(self, measurement_type: str,
-                                     concentration: float) -> Optional[List[np.ndarray]]:
+                                     concentration: float) -> Optional[np.ndarray]:
         """
         Get individual replicate time series data for a measurement at a specific concentration.
 
@@ -455,13 +489,25 @@ class Sample:
 
         Returns
         -------
-        List[np.ndarray] or None
-            List of time series arrays (one per replicate), or None if not found
+        np.ndarray or None
+            Time series data for all replicates at this concentration (shape: n_timepoints, n_replicates),
+            or None if not found
         """
-        if measurement_type not in self.individual_time_series:
+        if measurement_type not in self.time_series:
             return None
 
-        return self.individual_time_series[measurement_type].get(concentration)
+        # Get raw time series data
+        raw_data = self.time_series[measurement_type]  # shape: (n_timepoints, n_replicates, n_concentrations)
+
+        # Find concentration index
+        if self.concentrations is None:
+            return None
+
+        try:
+            conc_idx = np.where(np.isclose(self.concentrations, concentration))[0][0]
+            return raw_data[:, :, conc_idx]  # shape: (n_timepoints, n_replicates)
+        except IndexError:
+            return None
 
     def calculate_blanked_data(self, blank_sample: 'Sample',
                              measurement_types: Optional[List[str]] = None):
@@ -482,18 +528,15 @@ class Sample:
             if (measurement_type in self.time_series and
                 measurement_type in blank_sample.time_series):
 
-                # Subtract blank (broadcast across concentrations if needed)
+                # Subtract blank from raw data: (n_timepoints, n_replicates, n_concentrations)
                 sample_data = self.time_series[measurement_type]
                 blank_data = blank_sample.time_series[measurement_type]
 
                 # If blank has only one concentration, broadcast it
-                if blank_data.shape[1] == 1:
+                if blank_data.shape[2] == 1:
                     blank_data = np.broadcast_to(blank_data, sample_data.shape)
 
                 self.blanked_data[measurement_type] = sample_data - blank_data
-                self.blanked_data_error[measurement_type] = np.sqrt(
-                    self.error[measurement_type]**2 + blank_sample.error[measurement_type]**2
-                )
     def calculate_normalized_data(self, od_measurement: str = 'OD600',
                                 offset: float = 0.01,
                                 measurement_types: Optional[List[str]] = None):
@@ -521,18 +564,14 @@ class Sample:
 
         # Determine data source and issue warnings if needed
         if use_blanked_data:
-            od_data = self.blanked_data[od_measurement]
-            od_err = self.blanked_data_error[od_measurement]
+            od_data = self.blanked_data[od_measurement]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.blanked_data
-            error_source = self.blanked_data_error
             data_type_name = "blanked data"
         else:
             print(f"Warning: Using raw time series data for normalization instead of blanked data. "
                   f"Consider running calculate_blanked_data() first for more accurate results.")
-            od_data = self.time_series[od_measurement]
-            od_err = self.error[od_measurement]
+            od_data = self.time_series[od_measurement]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.time_series
-            error_source = self.error
             data_type_name = "time series data"
 
         if measurement_types is None:
@@ -540,26 +579,12 @@ class Sample:
 
         for measurement_type in measurement_types:
             if measurement_type in data_source:
-                measurement_data = data_source[measurement_type]
-                measurement_err = error_source[measurement_type]
+                measurement_data = data_source[measurement_type]  # shape: (n_timepoints, n_replicates, n_concentrations)
 
-                # Calculate normalized data
+                # Calculate normalized data element-wise
                 self.normalized_data[measurement_type] = measurement_data / (od_data + offset)
 
-                # Calculate normalized error using error propagation
-                # For f = a/b, relative error = sqrt((δa/a)² + (δb/b)²)
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    rel_err_measurement = np.where(measurement_data != 0,
-                                                 measurement_err / np.abs(measurement_data), 0)
-                    rel_err_od = np.where((od_data + offset) != 0,
-                                        od_err / np.abs(od_data + offset), 0)
-
-                    self.normalized_data_error[measurement_type] = (
-                        self.normalized_data[measurement_type] *
-                        np.sqrt(rel_err_measurement**2 + rel_err_od**2)
-                    )
-
-    def get_data(self, measurement_type: str, data_type: str = 'time_series') -> Optional[np.ndarray]:
+    def get_data(self, measurement_type: str, data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
         """
         Get data for a specific measurement and data type.
 
@@ -567,8 +592,9 @@ class Sample:
         ----------
         measurement_type : str
             Type of measurement to retrieve
-        data_type : str, default 'time_series'
-            Type of data: 'time_series', 'error', 'blanked_data', 'normalized_data'
+        data_type : str, default 'time_series_mean'
+            Type of data: 'time_series', 'time_series_mean', 'time_series_error',
+            'blanked_data', 'blanked_data_mean', 'normalized_data', 'normalized_data_mean'
 
         Returns
         -------
@@ -579,7 +605,7 @@ class Sample:
         return data_dict.get(measurement_type)
 
     def get_concentration_slice(self, measurement_type: str, concentration: float,
-                              data_type: str = 'time_series') -> Optional[np.ndarray]:
+                              data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
         """
         Get time series data for a specific concentration.
 
@@ -589,8 +615,8 @@ class Sample:
             Type of measurement
         concentration : float
             Concentration value
-        data_type : str, default 'time_series'
-            Type of data to retrieve
+        data_type : str, default 'time_series_mean'
+            Type of data to retrieve (use '_mean' versions for 2D data)
 
         Returns
         -------
@@ -604,12 +630,18 @@ class Sample:
         # Find concentration index
         try:
             conc_idx = np.where(np.isclose(self.concentrations, concentration))[0][0]
-            return data[:, conc_idx]
+            # Handle both 2D (n_timepoints, n_concentrations) and 3D (n_timepoints, n_replicates, n_concentrations) data
+            if data.ndim == 2:
+                return data[:, conc_idx]
+            elif data.ndim == 3:
+                return data[:, :, conc_idx]
+            else:
+                return None
         except IndexError:
             return None
 
     def get_timepoint_slice(self, measurement_type: str, timepoint_idx: int,
-                          data_type: str = 'time_series') -> Optional[np.ndarray]:
+                          data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
         """
         Get data across all concentrations for a specific timepoint.
 
@@ -619,8 +651,8 @@ class Sample:
             Type of measurement
         timepoint_idx : int
             Time point index
-        data_type : str, default 'time_series'
-            Type of data to retrieve
+        data_type : str, default 'time_series_mean'
+            Type of data to retrieve (use '_mean' versions for 2D data)
 
         Returns
         -------
@@ -632,6 +664,12 @@ class Sample:
             return None
 
         try:
-            return data[timepoint_idx, :]
+            # Handle both 2D (n_timepoints, n_concentrations) and 3D (n_timepoints, n_replicates, n_concentrations) data
+            if data.ndim == 2:
+                return data[timepoint_idx, :]
+            elif data.ndim == 3:
+                return data[timepoint_idx, :, :]  # Returns (n_replicates, n_concentrations)
+            else:
+                return None
         except IndexError:
             return None

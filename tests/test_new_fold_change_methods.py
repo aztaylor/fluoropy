@@ -109,20 +109,18 @@ def test_fold_change_workflow():
         sample.calculate_statistics(['OD600', 'GFP'], error_type='std')
     print("   ✓ Done")
 
-    # Step 0b: Populate individual replicate time series data
-    print("\n3b. Populating individual replicate time series data...")
-    for sample in frame.samples.values():
-        sample.populate_individual_time_series(['OD600', 'GFP'])
+    # Step 0b: Individual replicate time series data already populated during Sample init
+    print("\n3b. Individual replicate time series data available...")
     print("   ✓ Done")
 
     # Show what data is available
     print("\n3c. Individual replicate data available:")
     for sample_id, sample in frame.samples.items():
-        if sample.individual_time_series:
+        if sample.time_series:
             print(f"   {sample_id}:")
-            for measurement, conc_data in sample.individual_time_series.items():
-                for conc, replicates in conc_data.items():
-                    print(f"     {measurement} @ conc {conc}: {len(replicates)} replicates")
+            for measurement, data in sample.time_series.items():
+                n_timepoints, n_replicates, n_concentrations = data.shape
+                print(f"     {measurement}: shape {data.shape} ({n_timepoints} timepoints, {n_replicates} replicates, {n_concentrations} concentrations)")
 
     # Step 1: Blank-subtracted timeseries
     print("\n4. Calculating blank-subtracted timeseries...")

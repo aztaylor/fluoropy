@@ -23,8 +23,8 @@ class SampleFrame:
     ------
     >>> frame = SampleFrame(plates)
     >>> sample = frame['s14']  # Get sample by name
-    >>> data = sample.time_series['OD600']  # Get mean time series data
-    >>> error = sample.error['OD600']       # Get error data
+    >>> data = sample.time_series_mean['OD600']  # Get mean time series data
+    >>> error = sample.time_series_error['OD600']       # Get error data
 
     Attributes:
     -----------
@@ -278,6 +278,54 @@ class SampleFrame:
 
         return wells
 
+    def calculate_read_timeseries_statistics(self, measurement_types: Optional[List[str]] = None) -> None:
+        """
+        Calculate mean and error of raw read time series for each sample.
+
+        For each sample and measurement type, computes the mean and standard error
+        across replicates for the raw time series data.
+
+        Stores results as:
+        - sample.time_series_mean: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+        - sample.time_series_error: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+
+        Parameters
+        ----------
+        measurement_types : List[str], optional
+            Measurement types to calculate statistics for. If None, processes all available.
+        """
+        if measurement_types is None:
+            measurement_types = self._detect_measurement_types()
+
+        for sample in self.samples.values():
+            # Initialize storage dictionaries
+            if not hasattr(sample, 'time_series_mean'):
+                sample.time_series_mean = {}
+            if not hasattr(sample, 'time_series_error'):
+                sample.time_series_error = {}
+
+            for measurement in measurement_types:
+                # Collect replicate data for this measurement
+                replicate_data = []
+
+                for well in sample.wells:
+                    if well.is_excluded():
+                        continue
+                    data = well.time_series.get(measurement)
+                    if data is not None:
+                        replicate_data.append(data)
+
+                if replicate_data:
+                    # Stack replicate data into array of shape (n_replicates, n_timepoints)
+                    data_array = np.array(replicate_data)
+
+                    # Calculate mean and standard error across replicates (axis=0)
+                    mean = np.mean(data_array, axis=0)
+                    sem = np.std(data_array, axis=0, ddof=1) / np.sqrt(data_array.shape[0])
+
+                    sample.time_series_mean[measurement] = mean
+                    sample.time_series_error[measurement] = sem
+
     def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None) -> None:
         """
         Calculate blank-subtracted time series data for individual samples.
@@ -348,7 +396,10 @@ class SampleFrame:
                 sample.normalized_timeseries = sample.normalized_data
             else:
                 print(f"Warning: No blank-subtracted data for {sample.sample_type}. "
-                      f"Call calculate_blank_subtracted_timeseries() first.")
+                      f"Call calculate_blank_subtracted_timeseries() first. "
+                      f"Using raw data for normalization.")
+                sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
+                sample.normalized_timeseries = sample.normalized_data
 
     def calculate_normalized_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
                                                    error_type: str = 'std') -> None:
@@ -1429,6 +1480,246 @@ class SampleFrame:
 
         plt.tight_layout()
         return fig, ax
+
+    def plot_normalized_timeseries(self,
+                                   measurement: str,
+                                   sample_ids: Optional[List[str]] = None,
+                                   figsize: Optional[Tuple[int, int]] = None,
+                                   title: Optional[str] = None,
+                                   legend_title: str = "Concentration",
+                                   ylabel: Optional[str] = None,
+                                   xlabel: str = "Time (hours)",
+                                   show_error: bool = True,
+                                   error_type: str = 'std',
+                                   error_alpha: float = 0.1,
+                                   concentration_idx_range: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
+        """
+        Plot OD normalized fluorescence time series for each sample as subplots.
+
+        Creates a subplot for each sample, displaying the mean normalized timeseries
+        with optional error bands. Each concentration within a sample is shown as a
+        separate line/band pair.
+
+        Parameters
+        ----------
+        measurement : str
+            Measurement type to plot (e.g., 'GFP', 'RFP')
+        sample_ids : List[str], optional
+            List of sample IDs to include. If None, includes all non-blank samples.
+        figsize : Tuple[int, int], optional
+            Figure size (width, height) in inches. If None, auto-calculated based on
+            number of samples (approx 4 inches per sample)
+        title : str, optional
+            Figure title. If None, auto-generates based on measurement
+        legend_title : str, default "Concentration"
+            Title for the legend indicating what different lines represent
+        ylabel : str, optional
+            Y-axis label. If None, uses "OD Normalized {measurement}"
+        xlabel : str, default "Time (hours)"
+            X-axis label
+        show_error : bool, default True
+            Whether to show error bands around the mean curves
+        error_type : str, default 'std'
+            Type of error to display: 'std' (standard deviation) or 'sem'
+            (standard error of mean)
+        error_alpha : float, default 0.1
+            Transparency level for the error bands (0.0 to 1.0)
+        concentration_idx_range : Tuple[int, int], optional
+            Tuple of (start_idx, end_idx) to plot only a range of concentrations (0-based indices).
+            If None, plots all concentrations.
+
+        Returns
+        -------
+        Tuple[plt.Figure, Dict[str, plt.Axes]]
+            - Figure object
+            - Dictionary mapping sample IDs to Axes objects
+
+        Raises
+        ------
+        ValueError
+            If sample_ids are invalid or measurement not found
+        RuntimeError
+            If normalized timeseries data not calculated
+        """
+        # Validate inputs
+        if not sample_ids:
+            sample_ids = [sid for sid in self.samples.keys()
+                         if not self.samples[sid].is_blank]
+
+        if not sample_ids:
+            raise ValueError("No samples found (excluding blanks)")
+
+        # Validate sample IDs
+        for sid in sample_ids:
+            if sid not in self.samples:
+                raise ValueError(f"Sample ID '{sid}' not found in SampleFrame")
+
+        # Check that we have normalized timeseries data
+        has_normalized_data = False
+        for sample_id in sample_ids:
+            sample = self.samples[sample_id]
+            if hasattr(sample, 'normalized_timeseries') and sample.normalized_timeseries:
+                if measurement in sample.normalized_timeseries:
+                    has_normalized_data = True
+                    break
+
+        if not has_normalized_data:
+            raise RuntimeError(f"No normalized timeseries data found for measurement '{measurement}'. "
+                             f"Call calculate_normalized_timeseries() first.")
+
+        # First, calculate statistics if not already done
+        for sample_id in sample_ids:
+            sample = self.samples[sample_id]
+            if hasattr(sample, 'normalized_timeseries') and sample.normalized_timeseries:
+                if not hasattr(sample, 'normalized_timeseries_mean') or not sample.normalized_timeseries_mean:
+                    # Calculate statistics for this sample
+                    self.calculate_normalized_timeseries_statistics([measurement], error_type)
+
+        # Calculate grid dimensions for balanced rectangular layout
+        n_samples = len(sample_ids)
+        if figsize is None:
+            n_cols = int(np.ceil(np.sqrt(n_samples)))
+            n_cols = max(1, min(n_cols, 5))  # Keep between 1-5 columns
+            n_rows = int(np.ceil(n_samples / n_cols))
+            figsize = (n_cols * 4, n_rows * 3.5)
+        else:
+            n_cols = int(np.ceil(np.sqrt(n_samples)))
+            n_cols = max(1, min(n_cols, 5))
+            n_rows = int(np.ceil(n_samples / n_cols))
+
+        fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize,
+                                       squeeze=False, sharey=True)
+
+        axes_flat = axes_array.flatten()
+
+        # Set overall title
+        if title is None:
+            title = f"OD Normalized {measurement} Time Series"
+        fig.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
+
+        # Store axes for return
+        axes_dict = {}
+
+        # Define colors for different concentrations
+        colors = plt.cm.viridis(np.linspace(0, 1, 10))  # Up to 10 concentrations
+
+        # Plot for each sample
+        for subplot_idx, sample_id in enumerate(sample_ids):
+            ax = axes_flat[subplot_idx]
+            sample = self.samples[sample_id]
+
+            # Check if normalized data exists
+            if not hasattr(sample, 'normalized_timeseries') or not sample.normalized_timeseries:
+                ax.text(0.5, 0.5, f"No data for {sample_id}",
+                       ha='center', va='center', transform=ax.transAxes)
+                ax.set_visible(True)
+                axes_dict[sample_id] = ax
+                continue
+
+            if measurement not in sample.normalized_timeseries:
+                ax.text(0.5, 0.5, f"Measurement {measurement}\nnot found",
+                       ha='center', va='center', transform=ax.transAxes)
+                ax.set_visible(True)
+                axes_dict[sample_id] = ax
+                continue
+
+            # Get mean and error data
+            if hasattr(sample, 'normalized_timeseries_mean') and sample.normalized_timeseries_mean:
+                print(f"Normalized statistics found for {sample_id} with shape {sample.normalized_timeseries_mean.get(measurement).shape if sample.normalized_timeseries_mean.get(measurement) is not None else 'N/A'}")
+                mean_data = sample.normalized_timeseries_mean.get(measurement)
+                error_data = sample.normalized_timeseries_error.get(measurement) if show_error else None
+            else:
+                # Fallback: use raw normalized data directly
+                print(f"Warning: No statistics found for {sample_id}, using raw normalized data")
+                mean_data = sample.normalized_timeseries[measurement]
+                error_data = None
+
+            if mean_data is None or mean_data.size == 0:
+                ax.text(0.5, 0.5, f"No normalized data\nfor {sample_id}",
+                       ha='center', va='center', transform=ax.transAxes)
+                ax.set_visible(True)
+                axes_dict[sample_id] = ax
+                continue
+
+            # Get time points
+            time = sample.time
+            if time is None:
+                # Try to generate time points
+                time = np.arange(mean_data.shape[0])
+
+            #print(f"DEBUG: Plotting sample {sample_id} with mean data shape {mean_data.shape} and error data shape {error_data.shape if error_data is not None else 'N/A'}")
+            #print(f"DEBUG: Time points length: {len(time)}")
+
+            # Get concentrations
+            concentrations = sample.get_concentrations()
+
+            # Apply concentration range filter if specified
+            if concentration_idx_range is not None:
+                start_idx, end_idx = concentration_idx_range
+                conc_indices = np.arange(len(concentrations))[start_idx:end_idx+1]
+                concentrations = concentrations[conc_indices]
+            else:
+                conc_indices = np.arange(len(concentrations))
+
+            # Plot mean and error for each concentration
+            for idx, (conc_idx, conc) in enumerate(zip(conc_indices, concentrations)):
+                color = colors[idx % len(colors)]
+
+                # Get data for this concentration
+                if len(mean_data.shape) == 2:
+                    # Multi-concentration data: shape (n_timepoints, n_concentrations)
+                    conc_mean = mean_data[:, conc_idx]
+                    conc_error = error_data[:, conc_idx] if error_data is not None else None
+                    #print(f"DEBUG: Plotting {sample_id} conc {conc} with mean shape {conc_mean.shape} and error shape {conc_error.shape if conc_error is not None else 'N/A'}")
+                else:
+                    # Single concentration: shape (n_timepoints,)
+                    conc_mean = mean_data
+                    conc_error = error_data if error_data is not None else None
+
+                # Plot mean line
+                ax.scatter(time,
+                           conc_mean,
+                           s=1,
+                           color=color,
+                           label=f"[{conc}]",
+                           zorder=3)
+
+                # Add error band if requested
+                if show_error and conc_error is not None:
+                    #print(f"DEBUG: Adding error band for {sample_id} conc {conc}")
+                    #print(f"DEBUG: conc_mean shape: {conc_mean.shape}, conc_error shape: {conc_error.shape}")
+                    #print(f"DEBUG: time shape: {time.shape}")
+                    #print(f"DEBUG: conc_mean sample values: {conc_mean[:5]}")
+                    ax.fill_between(time[0],
+                                   conc_mean - conc_error,
+                                   conc_mean + conc_error,
+                                   alpha=error_alpha, color=color, zorder=1)
+
+            # Format subplot
+            ax.set_xlabel(xlabel, fontsize=10)
+            if ylabel is None:
+                ax.set_ylabel(f"OD Normalized {measurement}", fontsize=10)
+            else:
+                ax.set_ylabel(ylabel, fontsize=10)
+            ax.set_title(sample_id, fontsize=11, fontweight='bold')
+            ax.grid(True, alpha=0.3, linestyle='--')
+            if len(concentrations) > 0:
+                handles, labels = ax.get_legend_handles_labels()
+                fig.legend(handles, labels,
+                          loc='center',
+                          bbox_to_anchor=(1.15, 0.5),
+                          fontsize=9,
+                          title=legend_title,
+                          title_fontsize=10)
+
+            axes_dict[sample_id] = ax
+
+        # Hide unused subplots
+        for idx in range(len(sample_ids), len(axes_flat)):
+            axes_flat[idx].set_visible(False)
+
+        plt.tight_layout()
+        return fig, axes_dict
 
         # Set reasonable axis limits
         ax.set_ylim(bottom=0)

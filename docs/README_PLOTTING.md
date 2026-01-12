@@ -309,9 +309,10 @@ SampleFrame
   │  └─ Wells (raw time_series data)
   │     └─ Well.time_series['OD600'] = numpy array
   │
-  └─ Samples (calculated statistics)
-     ├─ Sample.time_series['OD600'] shape: (n_timepoints, n_concentrations)
-     ├─ Sample.error['OD600'] shape: (n_timepoints, n_concentrations)
+  └─ Samples (raw and calculated statistics)
+     ├─ Sample.time_series['OD600'] shape: (n_timepoints, n_replicates, n_concentrations)
+     ├─ Sample.time_series_mean['OD600'] shape: (n_timepoints, n_concentrations)
+     ├─ Sample.time_series_error['OD600'] shape: (n_timepoints, n_concentrations)
      ├─ Sample.concentrations: sorted unique concentration values
      └─ Sample.time: time points array
 ```

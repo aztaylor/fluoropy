@@ -39,14 +39,17 @@ sample.calculate_statistics()
 
 print(f"Sample: {sample}")
 print(f"Concentrations: {sample.concentrations}")
-print(f"Time series shape: {sample.time_series['OD600'].shape}")
-print(f"Error array shape: {sample.error['OD600'].shape}")
+print(f"Raw time series shape: {sample.time_series['OD600'].shape}")
+print(f"Time series mean shape: {sample.time_series_mean['OD600'].shape}")
+print(f"Time series error array shape: {sample.time_series_error['OD600'].shape}")
 
 print("\nData structure verification:")
 print(f"- time_series['OD600'] is numpy array: {isinstance(sample.time_series['OD600'], np.ndarray)}")
-print(f"- Shape is (n_timepoints, n_concentrations): {sample.time_series['OD600'].shape}")
+print(f"- Raw shape is (n_timepoints, n_replicates, n_concentrations): {sample.time_series['OD600'].shape}")
 print(f"- Number of timepoints: {sample.time_series['OD600'].shape[0]}")
-print(f"- Number of concentrations: {sample.time_series['OD600'].shape[1]}")
+print(f"- Number of replicates: {sample.time_series['OD600'].shape[1]}")
+print(f"- Number of concentrations: {sample.time_series['OD600'].shape[2]}")
+print(f"- Mean shape is (n_timepoints, n_concentrations): {sample.time_series_mean['OD600'].shape}")
 
 print("\nFinal values for each concentration:")
 final_values = sample.time_series['OD600'][-1, :]  # Last timepoint, all concentrations
