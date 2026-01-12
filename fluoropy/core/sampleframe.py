@@ -255,6 +255,83 @@ class SampleFrame:
                 print(f"Warning: No blank-subtracted data for {sample.sample_type}. "
                       f"Call calculate_blank_subtracted_timeseries() first.")
 
+    def calculate_normalized_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
+                                                   error_type: str = 'std') -> None:
+        """
+        Calculate mean and error of OD normalized fluorescent timeseries for each sample.
+
+        For each sample and measurement type, computes the mean and error (std or sem)
+        across replicates for the normalized timeseries data.
+
+        Stores results as:
+        - sample.normalized_timeseries_mean: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+        - sample.normalized_timeseries_error: Dict[str, np.ndarray] with shape (n_timepoints, n_concentrations)
+
+        Parameters
+        ----------
+        measurement_types : List[str], optional
+            Measurement types to calculate statistics for. If None, processes all measurements
+            in normalized_timeseries.
+        error_type : str, default 'std'
+            Type of error to calculate: 'std' (standard deviation) or 'sem' (standard error of mean)
+
+        Raises
+        ------
+        ValueError
+            If error_type is not 'std' or 'sem'
+        """
+        if error_type not in ('std', 'sem'):
+            raise ValueError(f"error_type must be 'std' or 'sem', got {error_type}")
+
+        for sample in self.samples.values():
+            if sample.is_blank:
+                continue
+
+            # Check if normalized data exists
+            if not hasattr(sample, 'normalized_timeseries') or not sample.normalized_timeseries:
+                print(f"Warning: No normalized timeseries data for {sample.sample_type}. "
+                      f"Call calculate_normalized_timeseries() first.")
+                continue
+
+            # Initialize storage dictionaries
+            if not hasattr(sample, 'normalized_timeseries_mean'):
+                sample.normalized_timeseries_mean = {}
+            if not hasattr(sample, 'normalized_timeseries_error'):
+                sample.normalized_timeseries_error = {}
+
+            # Determine which measurements to process
+            if measurement_types is None:
+                measurements_to_process = list(sample.normalized_timeseries.keys())
+            else:
+                measurements_to_process = [m for m in measurement_types
+                                           if m in sample.normalized_timeseries]
+
+            # Calculate statistics for each measurement type
+            for measurement in measurements_to_process:
+                data = sample.normalized_timeseries[measurement]
+
+                if data is None or data.size == 0:
+                    continue
+
+                # data shape is (n_timepoints, n_concentrations) or (n_timepoints,)
+                # Calculate mean and error across replicates (axis=1 for 2D, or axis=0 for 1D)
+                if len(data.shape) == 2:
+                    # Multi-concentration data: shape (n_timepoints, n_concentrations)
+                    mean = np.mean(data, axis=1)
+
+                    if error_type == 'std':
+                        error = np.std(data, axis=1, ddof=1)
+                    else:  # sem
+                        n_replicates = data.shape[1]
+                        error = np.std(data, axis=1, ddof=1) / np.sqrt(n_replicates)
+                else:
+                    # Single timeseries: shape (n_timepoints,)
+                    mean = data
+                    error = np.zeros_like(data)
+
+                sample.normalized_timeseries_mean[measurement] = mean
+                sample.normalized_timeseries_error[measurement] = error
+
     def calculate_fold_change(self, measurement: str,
                             od_measurement: str = 'OD600',
                             alpha: float = 0.01) -> None:
