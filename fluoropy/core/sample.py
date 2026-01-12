@@ -23,41 +23,50 @@ class Sample:
     time_series : Dict[str, np.ndarray]
         Raw individual replicate data for each measurement type
         Shape: (n_timepoints, n_replicates, n_concentrations)
+        Populated on initialization.
 
     time : np.ndarray
         Time points array
         Shape: (n_timepoints,)
+        Populated on initialization.
+
+    concentrations : np.ndarray
+        Unique concentration values for this sample
+        Shape: (n_concentrations,)
+        Populated on initialization via calculate_statistics().
 
     time_series_mean : Dict[str, np.ndarray]
         Mean time series data across replicates for each measurement type
         Shape: (n_timepoints, n_concentrations)
+        Populated on initialization via calculate_statistics().
 
     time_series_error : Dict[str, np.ndarray]
         Error (std/sem) across replicates for each measurement type
         Shape: (n_timepoints, n_concentrations)
+        Populated on initialization via calculate_statistics().
 
     blanked_data : Dict[str, np.ndarray]
-        Blank-subtracted raw data for each measurement type
+        Blank-subtracted raw data for each measurement type (requires calculate_blanked_data)
         Shape: (n_timepoints, n_replicates, n_concentrations)
 
     blanked_data_mean : Dict[str, np.ndarray]
-        Mean blanked data across replicates for each measurement type
+        Mean blanked data across replicates for each measurement type (requires calculate_blanked_data)
         Shape: (n_timepoints, n_concentrations)
 
     blanked_data_error : Dict[str, np.ndarray]
-        Error (std/sem) for blanked data across replicates for each measurement type
+        Error (std/sem) for blanked data across replicates for each measurement type (requires calculate_blanked_data)
         Shape: (n_timepoints, n_concentrations)
 
     normalized_data : Dict[str, np.ndarray]
-        Normalized raw data: blanked_measurement / (offset + blanked_OD600)
+        Normalized raw data: blanked_measurement / (offset + blanked_OD600) (requires calculate_normalized_data)
         Shape: (n_timepoints, n_replicates, n_concentrations)
 
     normalized_data_mean : Dict[str, np.ndarray]
-        Mean normalized data across replicates for each measurement type
+        Mean normalized data across replicates for each measurement type (requires calculate_normalized_data)
         Shape: (n_timepoints, n_concentrations)
 
     normalized_data_error : Dict[str, np.ndarray]
-        Error (std/sem) for normalized data across replicates for each measurement type
+        Error (std/sem) for normalized data across replicates for each measurement type (requires calculate_normalized_data)
         Shape: (n_timepoints, n_concentrations)
 
     """
@@ -109,6 +118,8 @@ class Sample:
         if wells:
             self._initialize_from_wells()
             self._populate_time_series()
+            # Automatically calculate basic statistics
+            self.calculate_statistics()
 
     def __repr__(self) -> str:
         """String representation of the sample."""
@@ -150,7 +161,7 @@ class Sample:
             return
 
         if measurement_types is None:
-            measurement_types = self.get_measurement_types()
+            measurement_types = self._get_measurement_types()
 
         # Clear existing data
         self.time_series.clear()
@@ -347,18 +358,18 @@ class Sample:
             else:
                 return np.array([0.0])  # Default concentration
 
-    def has_time_series_data(self) -> bool:
+    def has_time_series_statistics(self) -> bool:
         """
-        Check if this sample has calculated time series data.
+        Check if this sample has calculated time series statistics.
 
         Returns
         -------
         bool
-            True if time series data exists, False otherwise
+            True if time series statistics exist, False otherwise
         """
-        return (hasattr(self, 'time_series') and
-                self.time_series and
-                len(self.time_series) > 0)
+        return (hasattr(self, 'time_series_mean') and
+                self.time_series_mean and
+                len(self.time_series_mean) > 0)
 
     def get_time_series_concentration_order(self) -> Optional[np.ndarray]:
         """
@@ -367,13 +378,13 @@ class Sample:
         Returns
         -------
         np.ndarray or None
-            Array of concentrations in time series column order, or None if no time series data
+            Array of concentrations in time series mean column order, or None if no time series statistics exist
         """
         if hasattr(self, '_timeseries_concentration_order') and self._timeseries_concentration_order is not None:
             return self._timeseries_concentration_order.copy()
         return None
 
-    def get_measurement_types(self) -> List[str]:
+    def _get_measurement_types(self) -> List[str]:
         """
         Get available measurement types from wells.
 
@@ -392,6 +403,10 @@ class Sample:
         """
         Calculate replicate statistics for this sample.
 
+        This method is called automatically during Sample initialization to populate
+        time_series_mean, time_series_error, and concentrations. Can be called again
+        with different parameters to recalculate with alternate orderings.
+
         Parameters
         ----------
         measurement_types : List[str], optional
@@ -405,7 +420,7 @@ class Sample:
             - 'original': Order by original plate design positions
         """
         if measurement_types is None:
-            measurement_types = self.get_measurement_types()
+            measurement_types = self._get_measurement_types()
 
         if not measurement_types:
             return
@@ -537,6 +552,7 @@ class Sample:
                     blank_data = np.broadcast_to(blank_data, sample_data.shape)
 
                 self.blanked_data[measurement_type] = sample_data - blank_data
+
     def calculate_normalized_data(self, od_measurement: str = 'OD600',
                                 offset: float = 0.01,
                                 measurement_types: Optional[List[str]] = None):
