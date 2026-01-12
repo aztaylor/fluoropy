@@ -306,8 +306,8 @@ class SampleFrame:
             measurements_to_process = [m for m in measurements if m in data_dict]
 
         # Initialize storage dictionaries for means and errors
-        mean_attr = f"{data_source.replace('_data', '')}_mean"
-        error_attr = f"{data_source.replace('_data', '')}_error"
+        mean_attr = f"{data_source}_mean"
+        error_attr = f"{data_source}_error"
 
         if not hasattr(sample, mean_attr):
             setattr(sample, mean_attr, {})
@@ -1497,18 +1497,17 @@ class SampleFrame:
         plt.tight_layout()
         return fig, ax
 
-    def plot_normalized_timeseries(self,
-                                   measurement: str,
-                                   sample_ids: Optional[List[str]] = None,
-                                   figsize: Optional[Tuple[int, int]] = None,
-                                   title: Optional[str] = None,
-                                   legend_title: str = "Concentration",
-                                   ylabel: Optional[str] = None,
-                                   xlabel: str = "Time (hours)",
-                                   show_error: bool = True,
-                                   error_type: str = 'std',
-                                   error_alpha: float = 0.1,
-                                   concentration_idx_range: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
+    def plot_mean_normalized_data(self, measurement: str,
+                                 sample_ids: Optional[List[str]] = None,
+                                 figsize: Optional[Tuple[int, int]] = None,
+                                 title: Optional[str] = None,
+                                 legend_title: str = "Concentration",
+                                 ylabel: Optional[str] = None,
+                                 xlabel: str = "Time (hours)",
+                                 show_error: bool = True,
+                                 error_type: str = 'std',
+                                 error_alpha: float = 0.1,
+                                 concentration_idx_range: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
         """
         Plot OD normalized fluorescence time series for each sample as subplots.
 
@@ -1574,8 +1573,8 @@ class SampleFrame:
         has_normalized_data = False
         for sample_id in sample_ids:
             sample = self.samples[sample_id]
-            if hasattr(sample, 'normalized_timeseries') and sample.normalized_timeseries:
-                if measurement in sample.normalized_timeseries:
+            if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
+                if measurement in sample.normalized_data_mean:
                     has_normalized_data = True
                     break
 
@@ -1586,8 +1585,8 @@ class SampleFrame:
         # First, calculate statistics if not already done
         for sample_id in sample_ids:
             sample = self.samples[sample_id]
-            if hasattr(sample, 'normalized_timeseries') and sample.normalized_timeseries:
-                if not hasattr(sample, 'normalized_timeseries_mean') or not sample.normalized_timeseries_mean:
+            if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
+                if not hasattr(sample, 'normalized_data_mean') or not sample.normalized_data_mean:
                     # Calculate statistics for this sample
                     self.calculate_normalized_timeseries_statistics([measurement], error_type)
 
@@ -1625,14 +1624,14 @@ class SampleFrame:
             sample = self.samples[sample_id]
 
             # Check if normalized data exists
-            if not hasattr(sample, 'normalized_timeseries') or not sample.normalized_timeseries:
+            if not hasattr(sample, 'normalized_data_mean') or not sample.normalized_data_mean:
                 ax.text(0.5, 0.5, f"No data for {sample_id}",
                        ha='center', va='center', transform=ax.transAxes)
                 ax.set_visible(True)
                 axes_dict[sample_id] = ax
                 continue
 
-            if measurement not in sample.normalized_timeseries:
+            if measurement not in sample.normalized_data_mean:
                 ax.text(0.5, 0.5, f"Measurement {measurement}\nnot found",
                        ha='center', va='center', transform=ax.transAxes)
                 ax.set_visible(True)
@@ -1640,10 +1639,10 @@ class SampleFrame:
                 continue
 
             # Get mean and error data
-            if hasattr(sample, 'normalized_timeseries_mean') and sample.normalized_timeseries_mean:
-                print(f"Normalized statistics found for {sample_id} with shape {sample.normalized_timeseries_mean.get(measurement).shape if sample.normalized_timeseries_mean.get(measurement) is not None else 'N/A'}")
-                mean_data = sample.normalized_timeseries_mean.get(measurement)
-                error_data = sample.normalized_timeseries_error.get(measurement) if show_error else None
+            if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
+                print(f"Normalized statistics found for {sample_id} with shape {sample.normalized_data_mean.get(measurement).shape if sample.normalized_data_mean.get(measurement) is not None else 'N/A'}")
+                mean_data = sample.normalized_data_mean.get(measurement)
+                error_data = sample.normalized_data_error.get(measurement) if show_error else None
             else:
                 # Fallback: use raw normalized data directly
                 print(f"Warning: No statistics found for {sample_id}, using raw normalized data")
