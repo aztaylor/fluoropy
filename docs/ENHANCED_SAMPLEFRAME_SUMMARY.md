@@ -108,6 +108,4 @@ sample[concentration]['blanked_normalized_fluorescence_OD600'] = {
     'mean': array([...]),           # Final processed data
     'std': array([...]),            # Final propagated error
 }
-```
-
-✅ **Ready to use in your notebook**: All methods are implemented and tested in `SampleFrame.py`!
+``` 
