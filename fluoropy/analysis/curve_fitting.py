@@ -99,24 +99,3 @@ def calculate_ec50(plate: Plate, well_groups: Dict[float, List[str]]) -> float:
     """Calculate EC50 (same as IC50 but for activation curves)."""
     return calculate_ic50(plate, well_groups)
 
-def fit_kinetic_curve(timepoints: List[float], values: List[float]) -> Dict:
-    """
-    Fit exponential kinetic curve to time-series data.
-
-    y = A * (1 - exp(-k*t)) + baseline
-    """
-    def exponential_growth(t, A, k, baseline):
-        return A * (1 - np.exp(-k * t)) + baseline
-
-    try:
-        popt, pcov = curve_fit(exponential_growth, timepoints, values)
-        A, k, baseline = popt
-
-        return {
-            'amplitude': A,
-            'rate_constant': k,
-            'baseline': baseline,
-            'fit_successful': True
-        }
-    except:
-        return {'fit_successful': False}

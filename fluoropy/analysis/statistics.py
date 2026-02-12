@@ -150,7 +150,7 @@ def detect_outliers(plate: Plate, well_list: List[str],
     Args:
         plate: Plate object containing the data
         well_list: List of well positions to analyze
-        method: 'iqr' (interquartile range) or 'zscore'
+        method: 'iqr' (interquartile range), 'zscore', or 'modified_zscore'
         timepoint: Specific timepoint for kinetic data
 
     Returns:
@@ -198,6 +198,16 @@ def detect_outliers(plate: Plate, well_list: List[str],
             z_score = abs(value - mean_val) / std_val if std_val > 0 else 0
             if z_score > threshold:
                 outliers.append(well_positions[i])
+
+    elif method == 'modified_zscore':
+        median_val = np.median(values)
+        mad = np.median(np.abs(values - median_val))
+        if mad > 0:
+            threshold = 3.5
+            for i, value in enumerate(values):
+                modified_z = 0.6745 * (value - median_val) / mad
+                if abs(modified_z) > threshold:
+                    outliers.append(well_positions[i])
 
     return outliers
 

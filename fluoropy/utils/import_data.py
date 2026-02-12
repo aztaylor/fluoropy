@@ -35,6 +35,12 @@ def import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float
     time = {}
     meta_data = {}
 
+    # Check read files and preemptiely strip whitespace
+    if type(read_labels) is not list:
+        read_labels = [read_labels]
+    else :
+        read_labels = [label.strip() for label in read_labels]
+
     n_timepoints = int(run_time/sampling_rate)
 
     if type(n_cols) is list:
@@ -45,8 +51,8 @@ def import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float
     for i, line in enumerate(file_read):
         read_line = line.strip().split("\t")
 
-        if read_line[0] in read_labels:
-            read_flag = read_line[0]
+        if read_line[0].strip() in read_labels:
+            read_flag = read_line[0].strip()
             metadata_flag = None
 
             data[read_flag] = np.zeros((n_rows, n_cols, n_timepoints))

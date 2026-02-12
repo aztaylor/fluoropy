@@ -20,7 +20,6 @@ __all__ = [
 
     # Curve Fitting
     'fit_dose_response',
-    'fit_kinetic_curve',
     'calculate_ic50',
     'calculate_ec50',
 
