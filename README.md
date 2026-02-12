@@ -1,14 +1,13 @@
 # fluoropy
 
 A Python package supplying tools for experimental design and data analysis for
-plate reader based fluorescence assays, fluorescence microscopy, and
-fluorescence using flow cytometery. While the package is focused on biological
+plate reader based fluorescence assays. While the package is focused on biological
 experiments that rely on time series fluorescence readout, It should be
-adaptable to other experiments that rely on the instruments above.
+adaptable to other similar experiments.
 
 Currently, the code base include tools for plate reader experiment analysis,
 including endpoint analysis, timeseries analysis, data normalization,
-statistical analysis, and visualization.
+statistical analysis, and visualization. I plan to add tools for more experimental pipelines in the future.
 
 ## Installation
 
