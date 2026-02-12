@@ -4,7 +4,6 @@ Plate and Well classes for managing fluorescence assay data.
 
 from typing import Dict, List, Optional, Tuple, Union, Any
 import numpy as np
-import pandas as pd
 class Well:
     """
     Represents a single well in a microplate - a simple data container.
@@ -48,6 +47,8 @@ class Well:
         self.sample_type: Optional[str] = None
         self.concentration: Optional[float] = None
         self.medium: Optional[str] = None
+        self.antibiotics: Optional[str] = None
+        self.inducers: Dict[str, float] = {}
         self.modifications: Optional[List[str]] = None
 
         # Well classification
@@ -78,7 +79,9 @@ class Well:
 
     def set_sample_info(self, sample_type: str, concentration: Optional[float] = None,
                        medium: Optional[str] = None, modifications: Optional[List[str]] = None,
-                       is_blank: bool = False, is_control: bool = False):
+                       is_blank: bool = False, is_control: bool = False,
+                       antibiotics: Optional[str] = None,
+                       inducers: Optional[Dict[str, float]] = None):
         """
         Set sample information for the well.
 
@@ -96,6 +99,10 @@ class Well:
             Whether this well is a blank control
         is_control : bool, default False
             Whether this well is a control
+        antibiotics : str, optional
+            Antibiotic condition string (e.g., 'Kan 50 µg/mL / Chlor 34 µg/mL')
+        inducers : Dict[str, float], optional
+            Inducer name to concentration mapping (e.g., {'aTc_ng_mL': 200.0})
         """
         self.sample_type = sample_type
         self.concentration = concentration
@@ -103,6 +110,10 @@ class Well:
         self.modifications = modifications or []
         self.is_blank = is_blank
         self.is_control = is_control
+        if antibiotics is not None:
+            self.antibiotics = antibiotics
+        if inducers is not None:
+            self.inducers = dict(inducers)
 
     def set_concentration(self, concentration: float):
         """Set the concentration for this well."""
@@ -111,6 +122,15 @@ class Well:
     def get_concentration(self) -> Optional[float]:
         """Get the concentration for this well."""
         return self.concentration
+
+    @property
+    def condition_key(self) -> tuple:
+        """Return a hashable key representing this well's experimental condition.
+
+        Returns (medium, antibiotics, frozenset(inducers.items())).
+        Used for matching blanks to samples in SampleFrame.
+        """
+        return (self.medium, self.antibiotics, frozenset(self.inducers.items()))
 
     # ======================================================================
     # EXCLUSION METHODS

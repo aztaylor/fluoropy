@@ -8,10 +8,6 @@ from collections import defaultdict
 from .plate import Plate
 from .sample import Sample
 from .well import Well
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
-
-
 class SampleFrame:
     """
     An indexable container for Sample objects from experimental plates.
@@ -280,8 +276,7 @@ class SampleFrame:
         """
         Helper method to calculate mean and error statistics for a data source.
 
-        Extracts the logic common to calculating statistics for any 3D data array
-        (n_timepoints, n_replicates, n_concentrations).
+        Delegates to Sample.calculate_data_source_statistics().
 
         Parameters
         ----------
@@ -294,75 +289,38 @@ class SampleFrame:
         error_type : str, default 'std'
             Type of error: 'std' (standard deviation) or 'sem' (standard error of mean)
         """
-        # Get the data dictionary from the sample
-        data_dict = getattr(sample, data_source, {})
-        if not data_dict:
-            return
+        sample.calculate_data_source_statistics(data_source, measurements, error_type)
 
-        # Determine which measurements to process
-        if measurements is None:
-            measurements_to_process = list(data_dict.keys())
-        else:
-            measurements_to_process = [m for m in measurements if m in data_dict]
-
-        # Initialize storage dictionaries for means and errors
-        mean_attr = f"{data_source}_mean"
-        error_attr = f"{data_source}_error"
-
-        if not hasattr(sample, mean_attr):
-            setattr(sample, mean_attr, {})
-        if not hasattr(sample, error_attr):
-            setattr(sample, error_attr, {})
-
-        mean_dict = getattr(sample, mean_attr)
-        error_dict = getattr(sample, error_attr)
-
-        # Calculate statistics for each measurement type
-        for measurement in measurements_to_process:
-            data = data_dict[measurement]
-            if data is None or data.size == 0:
-                continue
-
-            # data shape is (n_timepoints, n_replicates, n_concentrations)
-            # Calculate mean and error across replicates (axis=1)
-            if len(data.shape) == 3:
-                mean = np.mean(data, axis=1)
-
-                if error_type == 'std':
-                    error = np.std(data, axis=1, ddof=1)
-                else:  # sem
-                    n_replicates = data.shape[1]
-                    error = np.std(data, axis=1, ddof=1) / np.sqrt(n_replicates)
-            else:
-                # Handle edge case of non-3D data
-                mean = data
-                error = np.zeros_like(data)
-
-            mean_dict[measurement] = mean
-            error_dict[measurement] = error
-
-    def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None) -> None:
+    def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None,
+                                              match_inducers: bool = True) -> None:
         """
         Calculate blank-subtracted time series data for individual samples.
 
-        For each sample, subtracts the blank from the same media type and plate_id.
+        For each sample, subtracts the blank matching the same experimental
+        condition (media, antibiotics, plate_id, and optionally inducers).
         Stores result in sample.blanked_data attribute.
 
         Parameters
         ----------
         measurement_types : List[str], optional
             Measurement types to process. If None, processes all available.
+        match_inducers : bool, default True
+            If True, blanks must also match on inducer concentrations.
+            If False, only media, antibiotics, and plate_id are used.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
 
-        # Group blanks by media type and plate_id for efficient lookup
-        blanks_by_media_plate: Dict[Tuple[str, str], 'Sample'] = {}
+        # Group blanks by condition key for efficient lookup
+        blanks_by_condition: Dict[tuple, 'Sample'] = {}
 
         for sample_id, sample in self.samples.items():
             if sample.is_blank:
-                key = (sample.medium, sample.plate_id)
-                blanks_by_media_plate[key] = sample
+                if match_inducers:
+                    key = sample.condition_key
+                else:
+                    key = sample.condition_key_no_inducers()
+                blanks_by_condition[key] = sample
 
         # Calculate blank-subtracted data for non-blank samples
         for sample in self.samples.values():
@@ -370,11 +328,16 @@ class SampleFrame:
                 continue
 
             # Find matching blank
-            blank_key = (sample.medium, sample.plate_id)
-            blank_sample = blanks_by_media_plate.get(blank_key)
+            if match_inducers:
+                blank_key = sample.condition_key
+            else:
+                blank_key = sample.condition_key_no_inducers()
+            blank_sample = blanks_by_condition.get(blank_key)
 
             if blank_sample is None:
-                print(f"Warning: No blank found for {sample.sample_type} (medium={sample.medium}, plate={sample.plate_id})")
+                print(f"Warning: No blank found for {sample.sample_type} "
+                      f"(medium={sample.medium}, antibiotics={sample.antibiotics}, "
+                      f"plate={sample.plate_id}, inducers={sample.inducers})")
                 continue
 
             # Calculate blank-subtracted data
@@ -997,756 +960,22 @@ class SampleFrame:
         return df_mean, df_std
 
 
-    def plot_fold_change_dose_response(self, timepoint_idx: int,
-                                       sample_ids: Optional[List[str]] = None,
-                                       x_logscale: bool = True,
-                                       y_logscale: bool = True,
-                                       figsize: Optional[Tuple[int, int]] = None,
-                                       title: Optional[str] = None,
-                                       ylabel: str = "Fold Change",
-                                       xlabel: str = "Concentration",
-                                       concentration_idx_range: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, plt.Axes]:
-        """
-        Plot dose-response curve: fold change vs concentration at a specific timepoint.
-
-        Parameters
-        ----------
-        timepoint_idx : int
-            Index of the timepoint to plot (0-based)
-        sample_ids : List[str], optional
-            List of sample IDs to plot. If None, plots all test samples.
-        x_logscale : bool, default True
-            If True, use log scale for x-axis (concentration)
-        y_logscale : bool, default True
-            If True, use log scale for y-axis (fold change)
-        figsize : Tuple[int, int], optional
-            Figure size (width, height) in inches
-        title : str, optional
-            Figure title. If None, auto-generates based on timepoint index
-        ylabel : str, default "Fold Change"
-            Y-axis label
-        xlabel : str, default "Concentration"
-            X-axis label
-        concentration_idx_range : Tuple[int, int], optional
-            Tuple of (start_idx, end_idx) to plot only a range of concentrations (0-based indices).
-            If None, plots all non-zero concentrations.
-
-        Returns
-        -------
-        Tuple[plt.Figure, plt.Axes]
-            Figure and axes objects
-
-        Raises
-        ------
-        ValueError
-            If sample_ids are invalid or fold_change data not found
-        IndexError
-            If timepoint_idx is out of range
-        """
-        if not sample_ids:
-            sample_ids = self.get_test_samples()
-
-        if not sample_ids:
-            raise ValueError("No test samples found")
-
-        # Validate sample IDs
-        for sid in sample_ids:
-            if sid not in self.samples:
-                raise ValueError(f"Sample ID '{sid}' not found")
-
-        # Create figure
-        if figsize is None:
-            figsize = (10, 6)
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Set title
-        if title is None:
-            title = f"Dose-Response Curve at Timepoint {timepoint_idx}"
-        ax.set_title(title, fontsize=14, fontweight='bold')
-
-        # Plot data for each sample
-        colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
-
-        for color_idx, sample_id in enumerate(sample_ids):
-            sample = self.samples[sample_id]
-
-            if not hasattr(sample, 'fold_change_mean'):
-                print(f"Warning: No fold_change_mean data for {sample_id}")
-                continue
-
-            mean_dict = sample.fold_change_mean
-            error_dict = sample.fold_change_error
-
-            # Get concentrations (sorted, excluding 0.0 since we already normalized by it)
-            all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
-
-            if not all_concentrations:
-                print(f"Warning: No non-zero concentrations for {sample_id}")
-                continue
-
-            # Apply concentration range filter if specified
-            if concentration_idx_range is not None:
-                start_idx, end_idx = concentration_idx_range
-                concentrations = all_concentrations[start_idx:end_idx+1]
-            else:
-                concentrations = all_concentrations
-
-            if not concentrations:
-                print(f"Warning: No concentrations in specified range for {sample_id}")
-                continue
-
-            # Extract values at the specified timepoint
-            fold_changes = []
-            errors = []
-
-            for conc in concentrations:
-                mean_array = mean_dict[conc]
-                error_array = error_dict[conc]
-
-                # Get value at the specified timepoint
-                if timepoint_idx >= len(mean_array):
-                    raise IndexError(f"Timepoint index {timepoint_idx} out of range (max {len(mean_array)-1})")
-
-                fold_changes.append(mean_array[timepoint_idx])
-                errors.append(error_array[timepoint_idx])
-
-            # Plot line with error bars
-            ax.errorbar(concentrations, fold_changes, yerr=errors,
-                       marker='o', linestyle='-', linewidth=2, markersize=8,
-                       capsize=5, capthick=2, label=sample_id, color=colors[color_idx])
-
-        # Set axis scales
-        if x_logscale:
-            ax.set_xscale('log')
-
-        if y_logscale:
-            ax.set_yscale('log')
-
-        ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_xlabel(xlabel, fontsize=12)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.legend(loc='best', fontsize=11)
-
-        plt.tight_layout()
-        return fig, ax
-
-
-
-    def plot_replicate_time_series(self,
-                                   measurement: str,
-                                   sample_ids: Optional[List[str]] = None,
-                                   show_mean: bool = True,
-                                   figsize: Optional[Tuple[int, int]] = None,
-                                   title: Optional[str] = None,
-                                   ylabel: Optional[str] = None,
-                                   xlabel: str = "Time (hours)",
-                                   sharey: bool = True) -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
-        """
-        Plot time series curves for replicates of samples at each concentration.
-
-        Creates a subplot for each sample-concentration combination, displaying the
-        individual replicate curves (wells) within that subplot. Optionally overlays
-        the mean curve across replicates.
-
-        Parameters
-        ----------
-        measurement : str
-            Measurement type to plot (e.g., 'OD600', 'GFP')
-        sample_ids : List[str], optional
-            List of sample IDs to include. If None, includes all test samples.
-        show_mean : bool, default True
-            Whether to overlay the mean curve across replicates with error band
-        figsize : Tuple[int, int], optional
-            Figure size (width, height) in inches. If None, auto-calculated based on
-            number of subplots (approx 3-4 inches per subplot)
-        title : str, optional
-            Figure title. If None, auto-generates based on measurement
-        ylabel : str, optional
-            Y-axis label. If None, uses the measurement type name
-        xlabel : str, default "Time (hours)"
-            X-axis label
-
-        Returns
-        -------
-        Tuple[plt.Figure, Dict[str, plt.Axes]]
-            - Figure object
-            - Dictionary mapping "(sample, concentration)" strings to Axes objects
-
-        Raises
-        ------
-        ValueError
-            If sample_ids are invalid or measurement is not found
-        RuntimeError
-            If wells don't have time_series data (raw data required, statistics optional)
-
-        Example
-        -------
-        >>> frame = SampleFrame(plates)
-        >>> fig, axes = frame.plot_replicate_time_series('OD600', sample_ids=['s14', 's15'])
-        >>> plt.show()
-        """
-        # Validate inputs
-        if not sample_ids:
-            sample_ids = self.get_test_samples()
-
-        if not sample_ids:
-            raise ValueError("No test samples found. Check your sample data.")
-
-        # Validate sample IDs
-        for sid in sample_ids:
-            if sid not in self.samples:
-                raise ValueError(f"Sample ID '{sid}' not found in SampleFrame")
-
-        # Check first that we have valid wells with the measurement
-        measurement_found = False
-        wells_with_data = 0
-
-        for sample_id in sample_ids:
-            sample = self.samples[sample_id]
-            if not sample.wells:
-                raise RuntimeError(f"Sample '{sample_id}' has no wells")
-
-            for well in sample.wells:
-                if measurement in well.time_series and not well.is_excluded():
-                    measurement_found = True
-                    if well.time_points is not None:
-                        wells_with_data += 1
-
-        if not measurement_found:
-            # Try to find what measurements ARE available
-            available_measurements = set()
-            for sample_id in sample_ids:
-                for well in self.samples[sample_id].wells:
-                    available_measurements.update(well.time_series.keys())
-            raise ValueError(f"Measurement '{measurement}' not found in wells. Available: {list(available_measurements) if available_measurements else 'none'}")
-
-        if wells_with_data == 0:
-            raise RuntimeError("No wells with valid time_points data found")
-
-        # Collect all (sample_id, concentration) pairs with their wells
-        subplot_data = {}  # Key: (sample_id, conc), Value: list of wells
-
-        for sample_id in sample_ids:
-            sample = self.samples[sample_id]
-            # Group wells by concentration for this sample
-            conc_groups = {}
-            for well in sample.wells:
-                if not well.is_excluded() and measurement in well.time_series:
-                    conc = well.concentration
-                    # Create a unique key that includes well position to avoid concentration collisions
-                    # This ensures wells from different rows don't get merged
-                    if conc not in conc_groups:
-                        conc_groups[conc] = []
-                    conc_groups[conc].append(well)
-
-            # Add to subplot data, deduplicating wells by their object identity
-            for conc, wells in conc_groups.items():
-                if wells:  # Only if we have wells
-                    # Deduplicate: keep only unique well objects (same object shouldn't appear twice)
-                    seen_wells = {}
-                    unique_wells = []
-                    for well in wells:
-                        well_key = id(well)  # Use object identity to detect duplicates
-                        if well_key not in seen_wells:
-                            seen_wells[well_key] = True
-                            unique_wells.append(well)
-
-                    if unique_wells:  # Only add if we have unique wells after deduplication
-                        key = (sample_id, conc)
-                        subplot_data[key] = unique_wells
-
-                        # Debug: Print well positions for verification
-                        well_positions = [f"{w.well_id}" for w in unique_wells]
-                        # Uncomment below to debug well grouping
-                        #print(f"DEBUG: {sample_id} @ conc {conc}: {well_positions}")
-
-        if not subplot_data:
-            raise ValueError("No wells found with valid data")
-
-        # Sort by sample_id then concentration for consistent layout
-        sorted_keys = sorted(subplot_data.keys(), key=lambda x: (x[0], x[1]))
-        n_subplots = len(sorted_keys)
-
-        # Calculate grid dimensions for balanced rectangular layout
-        if figsize is None:
-            # Calculate dimensions to create a roughly square/rectangular layout
-            # Use golden ratio (~1.4) for more pleasant aspect ratio
-            n_cols = int(np.ceil(np.sqrt(n_subplots / 1.4)))
-            n_cols = max(2, min(n_cols, 8))  # Keep between 2-8 columns
-            n_rows = int(np.ceil(n_subplots / n_cols))
-            # Size: 3.5 inches per subplot in smaller dimension
-            figsize = (n_cols * 3.5, n_rows * 3.5)
-        else:
-            # If figsize provided, still calculate balanced grid
-            n_cols = int(np.ceil(np.sqrt(n_subplots / 1.4)))
-            n_cols = max(2, min(n_cols, 8))
-            n_rows = int(np.ceil(n_subplots / n_cols))
-
-        fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False, sharey=sharey)
-        axes_flat = axes_array.flatten()
-
-        # Set overall title
-        if title is None:
-            title = f"Replicate Time Series - {measurement}"
-        fig.suptitle(title, fontsize=16, fontweight='bold', y=0.995)
-
-        # Store axes for return
-        axes_dict = {}
-
-        # Define colors for different samples
-        #colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
-        #color_map = {sid: colors[i] for i, sid in enumerate(sample_ids)}
-
-        # Plot for each (sample, concentration) combination
-        for subplot_idx, (sample_id, conc) in enumerate(sorted_keys):
-            ax = axes_flat[subplot_idx]
-            wells = subplot_data[(sample_id, conc)]
-            #color = color_map[sample_id]
-
-            # Get time points from first valid well
-            time = None
-            for well in wells:
-                if well.time_points is not None:
-                    time = well.time_points
-                    break
-
-            if time is None:
-                raise RuntimeError(f"No valid time points found for {sample_id} at concentration {conc}. Check well.time_points are set.")
-
-            # Plot each replicate (individual well)
-            for well in wells:
-                if measurement in well.time_series:
-                    replicate_data = well.time_series[measurement]
-                    # Use plate_id for label if available, otherwise fall back to well_id
-                    label = getattr(well, 'plate_id', well.well_id)
-                    ax.plot(time, replicate_data, '-', alpha=0.6,
-                           linewidth=1.5, label=label, zorder=2)
-
-            # Optionally overlay mean and error band
-            if show_mean:
-                # Calculate mean and error from wells
-                replicate_arrays = np.column_stack([w.time_series[measurement] for w in wells])
-                mean_data = np.mean(replicate_arrays, axis=1)
-                error_data = np.std(replicate_arrays, axis=1)
-
-                # Plot mean
-                ax.plot(time, mean_data, 'o-', linewidth=2.5,
-                       markersize=6, label=f"{sample_id} mean", zorder=3)
-
-                # Add error band
-                ax.fill_between(time,
-                               mean_data - error_data,
-                               mean_data + error_data,
-                               alpha=0.15, zorder=1)
-
-            # Format subplot
-            ax.set_xlabel(xlabel, fontsize=10)
-            ax.set_ylabel(ylabel if ylabel else measurement, fontsize=10)
-            ax.set_title(f"{sample_id} [{conc}]", fontsize=11, fontweight='bold')
-            ax.grid(True, alpha=0.3, linestyle='--')
-            ax.legend(loc='best', fontsize=8, title="Replicates", title_fontsize=9)
-
-            # Store axes in dictionary with descriptive key
-            subplot_key = f"({sample_id}, {conc})"
-            axes_dict[subplot_key] = ax
-
-        # Hide unused subplots
-        for idx in range(n_subplots, len(axes_flat)):
-            axes_flat[idx].set_visible(False)
-
-        plt.tight_layout()
-        return fig, axes_dict
-
-    def plot_dose_response_with_hill_fit(self, timepoint_idx: int,
-                                         sample_ids: Optional[List[str]] = None,
-                                         x_logscale: bool = True,
-                                         y_logscale: bool = True,
-                                         figsize: Optional[Tuple[int, int]] = None,
-                                         title: Optional[str] = None,
-                                         ylabel: str = "Fold Change",
-                                         xlabel: str = "Concentration",
-                                         concentration_idx_range: Optional[Tuple[int, int]] = None,
-                                         num_points: int = 100) -> Tuple[plt.Figure, plt.Axes]:
-        """
-        Plot dose-response curve with Hill function fit overlay.
-
-        Parameters
-        ----------
-        timepoint_idx : int
-            Index of the timepoint to plot (0-based)
-        sample_ids : List[str], optional
-            List of sample IDs to plot. If None, plots all test samples.
-        x_logscale : bool, default True
-            If True, use log scale for x-axis (concentration)
-        y_logscale : bool, default True
-            If True, use log scale for y-axis (fold change)
-        figsize : Tuple[int, int], optional
-            Figure size (width, height) in inches
-        title : str, optional
-            Figure title. If None, auto-generates based on timepoint index
-        ylabel : str, default "Fold Change"
-            Y-axis label
-        xlabel : str, default "Concentration"
-            X-axis label
-        concentration_idx_range : Tuple[int, int], optional
-            Tuple of (start_idx, end_idx) to plot only a range of concentrations (0-based indices).
-        num_points : int, default 100
-            Number of points for the fitted curve
-
-        Returns
-        -------
-        Tuple[plt.Figure, plt.Axes]
-            Figure and axes objects
-        """
-        # First, calculate Hill fits
-        fit_results = self.calculate_hill_fits(timepoint_idx, sample_ids, concentration_idx_range)
-
-        if not sample_ids:
-            sample_ids = self.get_test_samples()
-
-        if not sample_ids:
-            raise ValueError("No test samples found")
-
-        # Create figure
-        if figsize is None:
-            figsize = (12, 7)
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Set title
-        if title is None:
-            title = f"Dose-Response Curve (Hill Fit) at Timepoint {timepoint_idx}"
-        ax.set_title(title, fontsize=14, fontweight='bold')
-
-        def hill_function(conc, ec50, hill, min_val, max_val):
-            return min_val + (max_val - min_val) * (conc ** hill) / (ec50 ** hill + conc ** hill)
-
-        colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
-
-        for color_idx, sample_id in enumerate(sample_ids):
-            sample = self.samples[sample_id]
-
-            if not hasattr(sample, 'fold_change_mean'):
-                print(f"Warning: No fold_change_mean data for {sample_id}")
-                continue
-
-            mean_dict = sample.fold_change_mean
-            error_dict = sample.fold_change_error
-
-            # Get concentrations
-            all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
-
-            if concentration_idx_range is not None:
-                start_idx, end_idx = concentration_idx_range
-                concentrations = all_concentrations[start_idx:end_idx+1]
-            else:
-                concentrations = all_concentrations
-
-            if not concentrations:
-                continue
-
-            # Extract values at timepoint
-            fold_changes = []
-            errors = []
-            for conc in concentrations:
-                mean_array = mean_dict[conc]
-                error_array = error_dict[conc]
-                if timepoint_idx >= len(mean_array):
-                    raise IndexError(f"Timepoint index {timepoint_idx} out of range")
-                fold_changes.append(mean_array[timepoint_idx])
-                errors.append(error_array[timepoint_idx])
-
-            # Plot data points
-            ax.errorbar(concentrations, fold_changes, yerr=errors,
-                       marker='o', linestyle='', linewidth=2, markersize=8,
-                       capsize=5, capthick=2, label=sample_id, color=colors[color_idx],
-                       alpha=0.7)
-
-            # Plot Hill fit curve if available
-            if sample_id in fit_results:
-                params = fit_results[sample_id]
-                ec50 = params['ec50']
-                hill = params['hill']
-                min_val = params['min']
-                max_val = params['max']
-                r_sq = params['r_squared']
-
-                # Create smooth curve
-                conc_min, conc_max = np.min(concentrations), np.max(concentrations)
-                if x_logscale:
-                    conc_smooth = np.logspace(np.log10(conc_min), np.log10(conc_max), num_points)
-                else:
-                    conc_smooth = np.linspace(conc_min, conc_max, num_points)
-
-                fc_smooth = hill_function(conc_smooth, ec50, hill, min_val, max_val)
-
-                ax.plot(conc_smooth, fc_smooth, '-', linewidth=2.5,
-                       color=colors[color_idx], alpha=0.9,
-                       label=f"{sample_id} fit (EC50={ec50:.2e}, n={hill:.2f}, R²={r_sq:.3f})")
-
-        # Set axis scales
-        if x_logscale:
-            ax.set_xscale('log')
-        if y_logscale:
-            ax.set_yscale('log')
-
-        ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_xlabel(xlabel, fontsize=12)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.legend(loc='best', fontsize=10)
-
-        plt.tight_layout()
-        return fig, ax
-
-    def plot_mean_normalized_data(self, measurement: str,
-                                 sample_ids: Optional[List[str]] = None,
-                                 figsize: Optional[Tuple[int, int]] = None,
-                                 title: Optional[str] = None,
-                                 legend_title: str = "Concentration",
-                                 ylabel: Optional[str] = None,
-                                 xlabel: str = "Time (hours)",
-                                 show_error: bool = True,
-                                 error_type: str = 'std',
-                                 error_alpha: float = 0.1,
-                                 concentration_idx_range: Optional[Tuple[int, int]] = None) -> Tuple[plt.Figure, Dict[str, plt.Axes]]:
-        """
-        Plot OD normalized fluorescence time series for each sample as subplots.
-
-        Creates a subplot for each sample, displaying the mean normalized timeseries
-        with optional error bands. Each concentration within a sample is shown as a
-        separate line/band pair.
-
-        Parameters
-        ----------
-        measurement : str
-            Measurement type to plot (e.g., 'GFP', 'RFP')
-        sample_ids : List[str], optional
-            List of sample IDs to include. If None, includes all non-blank samples.
-        figsize : Tuple[int, int], optional
-            Figure size (width, height) in inches. If None, auto-calculated based on
-            number of samples (approx 4 inches per sample)
-        title : str, optional
-            Figure title. If None, auto-generates based on measurement
-        legend_title : str, default "Concentration"
-            Title for the legend indicating what different lines represent
-        ylabel : str, optional
-            Y-axis label. If None, uses "OD Normalized {measurement}"
-        xlabel : str, default "Time (hours)"
-            X-axis label
-        show_error : bool, default True
-            Whether to show error bands around the mean curves
-        error_type : str, default 'std'
-            Type of error to display: 'std' (standard deviation) or 'sem'
-            (standard error of mean)
-        error_alpha : float, default 0.1
-            Transparency level for the error bands (0.0 to 1.0)
-        concentration_idx_range : Tuple[int, int], optional
-            Tuple of (start_idx, end_idx) to plot only a range of concentrations (0-based indices).
-            If None, plots all concentrations.
-
-        Returns
-        -------
-        Tuple[plt.Figure, Dict[str, plt.Axes]]
-            - Figure object
-            - Dictionary mapping sample IDs to Axes objects
-
-        Raises
-        ------
-        ValueError
-            If sample_ids are invalid or measurement not found
-        RuntimeError
-            If normalized timeseries data not calculated
-        """
-        # Validate inputs
-        if not sample_ids:
-            sample_ids = [sid for sid in self.samples.keys()
-                         if not self.samples[sid].is_blank]
-
-        if not sample_ids:
-            raise ValueError("No samples found (excluding blanks)")
-
-        # Validate sample IDs
-        for sid in sample_ids:
-            if sid not in self.samples:
-                raise ValueError(f"Sample ID '{sid}' not found in SampleFrame")
-
-        # Check that we have normalized timeseries data
-        has_normalized_data = False
-        for sample_id in sample_ids:
-            sample = self.samples[sample_id]
-            if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
-                if measurement in sample.normalized_data_mean:
-                    has_normalized_data = True
-                    break
-
-        if not has_normalized_data:
-            raise RuntimeError(f"No normalized timeseries data found for measurement '{measurement}'. "
-                             f"Call calculate_normalized_timeseries() first.")
-
-        # First, calculate statistics if not already done
-        for sample_id in sample_ids:
-            sample = self.samples[sample_id]
-            if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
-                if not hasattr(sample, 'normalized_data_mean') or not sample.normalized_data_mean:
-                    # Calculate statistics for this sample
-                    self.calculate_normalized_timeseries_statistics([measurement], error_type)
-
-        # Calculate grid dimensions for balanced rectangular layout
-        n_samples = len(sample_ids)
-        if figsize is None:
-            n_cols = int(np.ceil(np.sqrt(n_samples)))
-            n_cols = max(1, min(n_cols, 5))  # Keep between 1-5 columns
-            n_rows = int(np.ceil(n_samples / n_cols))
-            figsize = (n_cols * 4, n_rows * 3.5)
-        else:
-            n_cols = int(np.ceil(np.sqrt(n_samples)))
-            n_cols = max(1, min(n_cols, 5))
-            n_rows = int(np.ceil(n_samples / n_cols))
-
-        fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize,
-                                       squeeze=False, sharey=True)
-
-        axes_flat = axes_array.flatten()
-
-        # Set overall title
-        if title is None:
-            title = f"OD Normalized {measurement} Time Series"
-        fig.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
-
-        # Store axes for return
-        axes_dict = {}
-
-        # Define colors for different concentrations
-        colors = plt.cm.viridis(np.linspace(0, 1, 10))  # Up to 10 concentrations
-
-        # Plot for each sample
-        for subplot_idx, sample_id in enumerate(sample_ids):
-            ax = axes_flat[subplot_idx]
-            sample = self.samples[sample_id]
-
-            # Check if normalized data exists
-            if not hasattr(sample, 'normalized_data_mean') or not sample.normalized_data_mean:
-                ax.text(0.5, 0.5, f"No data for {sample_id}",
-                       ha='center', va='center', transform=ax.transAxes)
-                ax.set_visible(True)
-                axes_dict[sample_id] = ax
-                continue
-
-            if measurement not in sample.normalized_data_mean:
-                ax.text(0.5, 0.5, f"Measurement {measurement}\nnot found",
-                       ha='center', va='center', transform=ax.transAxes)
-                ax.set_visible(True)
-                axes_dict[sample_id] = ax
-                continue
-
-            # Get mean and error data
-            if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
-                print(f"Normalized statistics found for {sample_id} with shape {sample.normalized_data_mean.get(measurement).shape if sample.normalized_data_mean.get(measurement) is not None else 'N/A'}")
-                mean_data = sample.normalized_data_mean.get(measurement)
-                error_data = sample.normalized_data_error.get(measurement) if show_error else None
-            else:
-                # Fallback: use raw normalized data directly
-                print(f"Warning: No statistics found for {sample_id}, using raw normalized data")
-                mean_data = sample.normalized_timeseries[measurement]
-                error_data = None
-
-            if mean_data is None or mean_data.size == 0:
-                ax.text(0.5, 0.5, f"No normalized data\nfor {sample_id}",
-                       ha='center', va='center', transform=ax.transAxes)
-                ax.set_visible(True)
-                axes_dict[sample_id] = ax
-                continue
-
-            # Get time points
-            time = sample.time
-            if time is None:
-                # Try to generate time points
-                time = np.arange(mean_data.shape[0])
-
-            #print(f"DEBUG: Plotting sample {sample_id} with mean data shape {mean_data.shape} and error data shape {error_data.shape if error_data is not None else 'N/A'}")
-            #print(f"DEBUG: Time points length: {len(time)}")
-
-            # Get concentrations
-            concentrations = sample.get_concentrations()
-
-            # Apply concentration range filter if specified
-            if concentration_idx_range is not None:
-                start_idx, end_idx = concentration_idx_range
-                conc_indices = np.arange(len(concentrations))[start_idx:end_idx+1]
-                concentrations = concentrations[conc_indices]
-            else:
-                conc_indices = np.arange(len(concentrations))
-
-            # Plot mean and error for each concentration
-            for idx, (conc_idx, conc) in enumerate(zip(conc_indices, concentrations)):
-                color = colors[idx % len(colors)]
-
-                # Get data for this concentration
-                if len(mean_data.shape) == 2:
-                    # Multi-concentration data: shape (n_timepoints, n_concentrations)
-                    conc_mean = mean_data[:, conc_idx]
-                    conc_error = error_data[:, conc_idx] if error_data is not None else None
-                    #print(f"DEBUG: Plotting {sample_id} conc {conc} with mean shape {conc_mean.shape} and error shape {conc_error.shape if conc_error is not None else 'N/A'}")
-                else:
-                    # Single concentration: shape (n_timepoints,)
-                    conc_mean = mean_data
-                    conc_error = error_data if error_data is not None else None
-
-                # Plot mean line
-                ax.scatter(time,
-                           conc_mean,
-                           s=1,
-                           color=color,
-                           label=f"[{conc}]",
-                           zorder=3)
-
-                # Add error band if requested
-                if show_error and conc_error is not None:
-                    #print(f"DEBUG: Adding error band for {sample_id} conc {conc}")
-                    #print(f"DEBUG: conc_mean shape: {conc_mean.shape}, conc_error shape: {conc_error.shape}")
-                    #print(f"DEBUG: time shape: {time.shape}")
-                    #print(f"DEBUG: conc_mean sample values: {conc_mean[:5]}")
-                    ax.fill_between(time[0],
-                                   conc_mean - conc_error,
-                                   conc_mean + conc_error,
-                                   alpha=error_alpha, color=color, zorder=1)
-
-            # Format subplot
-            ax.set_xlabel(xlabel, fontsize=10)
-            if ylabel is None:
-                ax.set_ylabel(f"OD Normalized {measurement}", fontsize=10)
-            else:
-                ax.set_ylabel(ylabel, fontsize=10)
-            ax.set_title(sample_id, fontsize=11, fontweight='bold')
-            ax.grid(True, alpha=0.3, linestyle='--')
-            if len(concentrations) > 0:
-                handles, labels = ax.get_legend_handles_labels()
-                fig.legend(handles, labels,
-                          loc='center',
-                          bbox_to_anchor=(1.15, 0.5),
-                          fontsize=9,
-                          title=legend_title,
-                          title_fontsize=10)
-
-            axes_dict[sample_id] = ax
-
-        # Hide unused subplots
-        for idx in range(len(sample_ids), len(axes_flat)):
-            axes_flat[idx].set_visible(False)
-
-        plt.tight_layout()
-        return fig, axes_dict
-
-        # Set reasonable axis limits
-        ax.set_ylim(bottom=0)
-        ax.margins(0.05)
-
-        # Store in dictionary
-        axes_dict[f"{sample_id}_{conc}"] = ax
-
-        # Hide unused subplots
-        for idx in range(n_subplots, len(axes_flat)):
-            axes_flat[idx].set_visible(False)
-
-        plt.tight_layout()
-
-        return fig, axes_dict
+    def plot_fold_change_dose_response(self, timepoint_idx: int, **kwargs):
+        """Plot dose-response curve. See :func:`fluoropy.core.plotting.plot_fold_change_dose_response`."""
+        from .plotting import plot_fold_change_dose_response
+        return plot_fold_change_dose_response(self, timepoint_idx, **kwargs)
+
+    def plot_replicate_time_series(self, measurement: str, **kwargs):
+        """Plot replicate time series. See :func:`fluoropy.core.plotting.plot_replicate_time_series`."""
+        from .plotting import plot_replicate_time_series
+        return plot_replicate_time_series(self, measurement, **kwargs)
+
+    def plot_dose_response_with_hill_fit(self, timepoint_idx: int, **kwargs):
+        """Plot dose-response with Hill fit. See :func:`fluoropy.core.plotting.plot_dose_response_with_hill_fit`."""
+        from .plotting import plot_dose_response_with_hill_fit
+        return plot_dose_response_with_hill_fit(self, timepoint_idx, **kwargs)
+
+    def plot_mean_normalized_data(self, measurement: str, **kwargs):
+        """Plot mean normalized data. See :func:`fluoropy.core.plotting.plot_mean_normalized_data`."""
+        from .plotting import plot_mean_normalized_data
+        return plot_mean_normalized_data(self, measurement, **kwargs)

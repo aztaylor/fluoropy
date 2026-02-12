@@ -8,16 +8,14 @@ the fluoropy package but don't belong to any specific core functionality.
 from .conversions import *
 from .validation import *
 from .helpers import *
-from .import_data import _import_results
+from .import_data import import_results
 
 __all__ = [
     # Import/export utilities
-    "_import_results",
+    "import_results",
 
     # Conversion utilities
     "convert_units",
-    "normalize_fluorescence",
-    "calculate_fold_change",
 
     # Validation utilities
     "validate_well_position",
@@ -27,5 +25,4 @@ __all__ = [
     # Helper utilities
     "generate_well_positions",
     "parse_plate_format",
-    "calculate_statistics",
 ]

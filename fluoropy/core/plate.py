@@ -584,100 +584,115 @@ class Plate:
     def get_excluded_wells(self) -> List[Well]:
         """Get all excluded wells"""
         return [well for well in self.wells.values()
-                if hasattr(well, 'exclude') and well.exclude]
+                if well.is_excluded()]
 
     def get_included_wells(self) -> List[Well]:
         """Get all non-excluded wells"""
         return [well for well in self.wells.values()
-                if not (hasattr(well, 'exclude') and well.exclude)]
+                if not (well.is_excluded())]
+
+    # ======================================================================
+    # CSV LAYOUT LOADING METHODS
+    # ======================================================================
+
+    @staticmethod
+    def _read_grid_csv(csv_path: str) -> np.ndarray:
+        """
+        Read an 8×12 (or similar) grid CSV and return as a 2D numpy array of strings.
+
+        Expects CSV format with row letters as index and column numbers as header:
+            ,1,2,3,...,12
+            A,val,val,...
+            B,val,val,...
+
+        Parameters
+        ----------
+        csv_path : str
+            Path to the CSV file
+
+        Returns
+        -------
+        np.ndarray
+            2D array of string values with shape (n_rows, n_cols)
+        """
+        df = pd.read_csv(csv_path, index_col=0)
+        return df.values.astype(str)
+
+    def load_layout_csv(self, csv_path: str, attribute: str) -> None:
+        """
+        Load a plate layout CSV and apply it to wells.
+
+        Parameters
+        ----------
+        csv_path : str
+            Path to an 8×12 grid CSV file
+        attribute : str
+            What the CSV describes:
+            - ``'media'``: sets ``well.medium``
+            - ``'antibiotics'``: sets ``well.antibiotics`` (normalizes em-dash to None)
+            - Any other string: treated as an inducer name, sets
+              ``well.inducers[attribute] = float(value)``
+        """
+        grid = self._read_grid_csv(csv_path)
+        n_rows, n_cols = grid.shape
+
+        for row_idx in range(min(n_rows, self.rows)):
+            for col_idx in range(min(n_cols, self.cols)):
+                well_id = f"{chr(ord('A') + row_idx)}{col_idx + 1}"
+                well = self.wells.get(well_id)
+                if well is None:
+                    continue
+
+                value = grid[row_idx, col_idx].strip()
+
+                if attribute == 'media':
+                    well.medium = value if value else None
+                elif attribute == 'antibiotics':
+                    # Normalize em-dash and en-dash to None
+                    if value in ('—', '–', '-', '', 'nan', 'None', 'none'):
+                        well.antibiotics = None
+                    else:
+                        well.antibiotics = value
+                else:
+                    # Treat as inducer: parse numeric value
+                    try:
+                        well.inducers[attribute] = float(value)
+                    except (ValueError, TypeError):
+                        well.inducers[attribute] = 0.0
+
+    def load_plate_layouts(self, media_csv: str,
+                           antibiotics_csv: Optional[str] = None,
+                           inducer_csvs: Optional[Dict[str, str]] = None) -> None:
+        """
+        Load multiple plate layout CSVs at once.
+
+        Parameters
+        ----------
+        media_csv : str
+            Path to the media layout CSV
+        antibiotics_csv : str, optional
+            Path to the antibiotics layout CSV
+        inducer_csvs : Dict[str, str], optional
+            Mapping of inducer name to CSV path, e.g.
+            ``{'aTc_ng_mL': '/path/to/atc.csv', 'IPTG_mM': '/path/to/iptg.csv'}``
+        """
+        self.load_layout_csv(media_csv, 'media')
+
+        if antibiotics_csv is not None:
+            self.load_layout_csv(antibiotics_csv, 'antibiotics')
+
+        if inducer_csvs is not None:
+            for inducer_name, csv_path in inducer_csvs.items():
+                self.load_layout_csv(csv_path, inducer_name)
 
     # ======================================================================
     # VISUALIZATION METHODS
     # ======================================================================
 
-    def plot_timeseries_grid(self, measurement_type: str, figsize: tuple = (15, 10),
-                           title: Optional[str] = None, show_sample_info: bool = True):
-        """
-        Plot raw timeseries data for each well in an 8x12 grid matching plate layout.
-
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to plot (e.g., 'OD600', 'GFP')
-        figsize : tuple, default (15, 10)
-            Figure size in inches (width, height)
-        title : str, optional
-            Overall figure title. If None, uses measurement type and plate name.
-        show_sample_info : bool, default True
-            Whether to show sample type and concentration in subplot titles
-
-        Returns
-        -------
-        matplotlib.figure.Figure
-            The created figure object
-        """
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("matplotlib is required for plotting. Install with: pip install matplotlib")
-            return None
-
-        # Create figure and subplots in 8x12 grid
-        fig, axes = plt.subplots(8, 12, figsize=figsize, sharex=True, sharey=True)
-        fig.suptitle(title or f"{measurement_type} Timeseries - {self.name or 'Plate'}",
-                    fontsize=14, fontweight='bold')
-
-        # Plot data for each well position
-        for row in range(8):
-            for col in range(12):
-                ax = axes[row, col]
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
-                well = self.wells.get(well_id)
-
-                if well and hasattr(well, 'time_series') and measurement_type in well.time_series:
-                    # Get time series data
-                    y_data = well.time_series[measurement_type]
-                    x_data = well.time_points if hasattr(well, 'time_points') and well.time_points is not None else range(len(y_data))
-
-                    # Plot the data
-                    ax.plot(x_data, y_data, 'b-', linewidth=1.5, alpha=0.8)
-
-                    # Set background color based on sample type
-                    if hasattr(well, 'is_blank') and well.is_blank:
-                        ax.set_facecolor('#f0f0f0')  # Light gray for blanks
-                    elif hasattr(well, 'is_control') and well.is_control:
-                        ax.set_facecolor('#fff5f5')  # Light red for controls
-                    else:
-                        ax.set_facecolor('white')
-
-                    # Create subplot title
-                    if show_sample_info and hasattr(well, 'sample_type'):
-                        sample_info = well.sample_type or "Unknown"
-                        if hasattr(well, 'concentration') and well.concentration is not None:
-                            sample_info += f"\n{well.concentration}"
-                        ax.set_title(f"{well_id}\n{sample_info}", fontsize=8, pad=2)
-                    else:
-                        ax.set_title(well_id, fontsize=8, pad=2)
-
-                else:
-                    # Empty well or no data
-                    ax.set_facecolor('#e0e0e0')  # Gray for empty wells
-                    ax.set_title(well_id, fontsize=8, pad=2)
-                    ax.text(0.5, 0.5, 'No Data', ha='center', va='center',
-                           transform=ax.transAxes, fontsize=8, alpha=0.6)
-
-                # Format subplot
-                ax.tick_params(labelsize=6)
-                ax.grid(True, alpha=0.3)
-
-        # Set common labels
-        fig.text(0.5, 0.02, 'Time', ha='center', fontsize=12)
-        fig.text(0.02, 0.5, measurement_type, va='center', rotation='vertical', fontsize=12)
-
-        plt.tight_layout()
-        plt.subplots_adjust(top=0.93, bottom=0.07, left=0.05, right=0.98)
-
-        return fig
+    def plot_timeseries_grid(self, measurement_type: str, **kwargs):
+        """Plot raw timeseries grid. See :func:`fluoropy.core.plotting.plot_timeseries_grid`."""
+        from .plotting import plot_timeseries_grid
+        return plot_timeseries_grid(self, measurement_type, **kwargs)
 
     # ======================================================================
     # STATISTICAL ANALYSIS METHODS
@@ -722,7 +737,7 @@ class Plate:
 
         for well in self.wells.values():
             # Skip excluded wells
-            if hasattr(well, 'exclude') and well.exclude:
+            if well.is_excluded():
                 continue
 
             # Skip wells without the measurement
@@ -960,7 +975,7 @@ class Plate:
 
         for well in self.wells.values():
             # Skip excluded wells
-            if hasattr(well, 'exclude') and well.exclude:
+            if well.is_excluded():
                 continue
 
             # Skip wells without the measurement
@@ -1103,88 +1118,7 @@ class Plate:
 
         return z_matrix
 
-    def plot_zscore_heatmap(self, measurement_type: str, timepoint_idx: int,
-                           exclude_blanks: bool = True,
-                           exclude_controls: bool = False,
-                           figsize: tuple = (10, 6),
-                           title: Optional[str] = None,
-                           vmin: float = -3,
-                           vmax: float = 3) -> 'matplotlib.figure.Figure':
-        """
-        Plot a heatmap of z-scores across the plate.
-
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to plot
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells from plate statistics calculation
-        exclude_controls : bool, default False
-            Whether to exclude control wells from plate statistics calculation
-        figsize : tuple, default (10, 6)
-            Figure size in inches (width, height)
-        title : str, optional
-            Plot title. If None, generates automatic title.
-        vmin : float, default -3
-            Minimum value for color scale
-        vmax : float, default 3
-            Maximum value for color scale
-
-        Returns
-        -------
-        matplotlib.figure.Figure
-            The created figure object
-
-        Examples
-        --------
-        >>> fig = plate.plot_zscore_heatmap('OD600', timepoint_idx=10)
-        >>> plt.show()
-        """
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("matplotlib is required for plotting. Install with: pip install matplotlib")
-            return None
-
-        z_matrix = self.get_zscore_matrix(
-            measurement_type, timepoint_idx, exclude_blanks, exclude_controls
-        )
-
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Create heatmap
-        im = ax.imshow(z_matrix, cmap='RdBu_r', vmin=vmin, vmax=vmax, aspect='auto')
-
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label('Z-score', rotation=270, labelpad=20)
-
-        # Set labels
-        ax.set_xlabel('Column')
-        ax.set_ylabel('Row')
-
-        # Set ticks
-        ax.set_xticks(range(self.cols))
-        ax.set_xticklabels([str(i+1) for i in range(self.cols)])
-        ax.set_yticks(range(self.rows))
-        ax.set_yticklabels([chr(ord('A') + i) for i in range(self.rows)])
-
-        # Set title
-        if title is None:
-            title = f'Z-score Heatmap: {measurement_type} (Timepoint {timepoint_idx})'
-        ax.set_title(title)
-
-        # Add well labels for extreme values
-        for i in range(self.rows):
-            for j in range(self.cols):
-                z_val = z_matrix[i, j]
-                if not np.isnan(z_val) and abs(z_val) > 2:
-                    well_id = f"{chr(ord('A') + i)}{j + 1}"
-                    ax.text(j, i, f'{z_val:.1f}', ha='center', va='center',
-                           color='white' if abs(z_val) > 2.5 else 'black',
-                           fontweight='bold', fontsize=8)
-
-        plt.tight_layout()
-        return fig
+    def plot_zscore_heatmap(self, measurement_type: str, timepoint_idx: int, **kwargs):
+        """Plot z-score heatmap. See :func:`fluoropy.core.plotting.plot_zscore_heatmap`."""
+        from .plotting import plot_zscore_heatmap
+        return plot_zscore_heatmap(self, measurement_type, timepoint_idx, **kwargs)

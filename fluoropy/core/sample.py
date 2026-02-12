@@ -110,6 +110,8 @@ class Sample:
 
         # Sample properties (taken from first well)
         self.medium: Optional[str] = None
+        self.antibiotics: Optional[str] = None
+        self.inducers: Dict[str, float] = {}
         self.modifications: Optional[List[str]] = None
         self.is_blank: bool = False
         self.is_control: bool = False
@@ -129,6 +131,19 @@ class Sample:
         conc_info = f", {len(self.concentrations)}conc" if self.concentrations is not None else ""
         return f"Sample({self.sample_type}, {n_wells}wells, {n_measurements}meas{time_info}{conc_info})"
 
+    @property
+    def condition_key(self) -> tuple:
+        """Return a hashable key for condition-based blank matching.
+
+        Returns (medium, antibiotics, plate_id, frozenset(inducers.items())).
+        """
+        return (self.medium, self.antibiotics, self.plate_id,
+                frozenset(self.inducers.items()))
+
+    def condition_key_no_inducers(self) -> tuple:
+        """Return condition key without inducer info, for match_inducers=False."""
+        return (self.medium, self.antibiotics, self.plate_id)
+
     def _initialize_from_wells(self):
         """Initialize sample properties from wells."""
         if not self.wells:
@@ -137,6 +152,8 @@ class Sample:
         # Set properties from first well
         first_well = self.wells[0]
         self.medium = first_well.medium
+        self.antibiotics = first_well.antibiotics
+        self.inducers = dict(first_well.inducers) if first_well.inducers else {}
         self.modifications = first_well.modifications
         self.is_blank = first_well.is_blank
         self.is_control = first_well.is_control
@@ -489,6 +506,58 @@ class Sample:
         # Store results
         self.time_series_mean[measurement_type] = mean_array
         self.time_series_error[measurement_type] = error_array
+
+    def calculate_data_source_statistics(self, data_source: str,
+                                        measurements: list = None,
+                                        error_type: str = 'std') -> None:
+        """
+        Calculate mean and error statistics for an arbitrary data source attribute.
+
+        Parameters
+        ----------
+        data_source : str
+            Name of the data source attribute (e.g., 'blanked_data', 'normalized_data')
+        measurements : list, optional
+            Measurement types to process. If None, uses all available.
+        error_type : str, default 'std'
+            Type of error: 'std' or 'sem'
+        """
+        data_dict = getattr(self, data_source, {})
+        if not data_dict:
+            return
+
+        if measurements is None:
+            measurements_to_process = list(data_dict.keys())
+        else:
+            measurements_to_process = [m for m in measurements if m in data_dict]
+
+        mean_attr = f"{data_source}_mean"
+        error_attr = f"{data_source}_error"
+
+        mean_dict = getattr(self, mean_attr, {})
+        error_dict = getattr(self, error_attr, {})
+
+        for measurement in measurements_to_process:
+            data = data_dict[measurement]
+            if data is None or data.size == 0:
+                continue
+
+            if len(data.shape) == 3:
+                mean = np.nanmean(data, axis=1)
+                if error_type == 'std':
+                    error = np.nanstd(data, axis=1, ddof=1)
+                else:  # sem
+                    n_replicates = data.shape[1]
+                    error = np.nanstd(data, axis=1, ddof=1) / np.sqrt(n_replicates)
+            else:
+                mean = data
+                error = np.zeros_like(data)
+
+            mean_dict[measurement] = mean
+            error_dict[measurement] = error
+
+        setattr(self, mean_attr, mean_dict)
+        setattr(self, error_attr, error_dict)
 
     def get_individual_replicate_data(self, measurement_type: str,
                                      concentration: float) -> Optional[np.ndarray]:
