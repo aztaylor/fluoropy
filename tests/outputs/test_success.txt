@@ -1,2 +1,0 @@
-SUCCESS: All tests passed!
-Architecture is working correctly.

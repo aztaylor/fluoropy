@@ -67,6 +67,7 @@ instance/
 # Sphinx documentation
 docs/_build/
 docs/
+tests/
 
 # PyBuilder
 target/
@@ -148,3 +149,4 @@ shell_scripts
 Archive
 .claude
 CLAUDE.md
+.gitignore
