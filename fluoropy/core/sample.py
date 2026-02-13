@@ -135,14 +135,25 @@ class Sample:
     def condition_key(self) -> tuple:
         """Return a hashable key for condition-based blank matching.
 
-        Returns (medium, antibiotics, plate_id, frozenset(inducers.items())).
+        Returns (medium, frozenset(antibiotics.items()), plate_id,
+                 frozenset(inducers.items()), frozenset(other_modifications.items())).
         """
-        return (self.medium, self.antibiotics, self.plate_id,
-                frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items()))
+        return (
+            self.medium,
+            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            self.plate_id,
+            frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items()),
+            frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
+        )
 
     def condition_key_no_inducers(self) -> tuple:
         """Return condition key without inducer info, for match_inducers=False."""
-        return (self.medium, self.antibiotics, self.plate_id)
+        return (
+            self.medium,
+            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            self.plate_id,
+            frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
+        )
 
     def _initialize_from_wells(self):
         """Initialize sample properties from wells."""
