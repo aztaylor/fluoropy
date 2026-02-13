@@ -71,25 +71,25 @@ class Sample:
 
     """
 
-    def __init__(self, sample_type: str, wells: Optional[List[Well]] = None):
+    def __init__(self, name: str, wells: Optional[List[Well]] = None):
         """
         Initialize a Sample object.
 
         Parameters
         ----------
-        sample_type : str
+        name : str
             Type/name of the sample (e.g., 's14', 'control')
         wells : List[Well], optional
             List of wells containing this sample type
         """
-        self.sample_type = sample_type
+        self.name = name
         self.wells = wells or []
         self.plate_id = None  # Plate identifier if needed
 
         # Core data structures - raw individual replicate data
         self.time_series: Dict[str, np.ndarray] = {}  # Raw data {measurement_type: np.ndarray(n_timepoints, n_replicates, n_concentrations)}
         self.time: Optional[np.ndarray] = None        # Time points
-        self.concentrations: Optional[np.ndarray] = None  # Concentration values
+        self.concentrations: Optional[Dict[str, np.ndarray]] = None  # Concentration values of the molecule of interest
 
         # Statistics derived from time_series
         self.time_series_mean: Dict[str, np.ndarray] = {}  # Mean across replicates
@@ -110,9 +110,9 @@ class Sample:
 
         # Sample properties (taken from first well)
         self.medium: Optional[str] = None
-        self.antibiotics: Optional[str] = None
-        self.inducers: Dict[str, float] = {}
-        self.modifications: Optional[List[str]] = None
+        self.antibiotics: Optional[Dict[str, np.ndarray]] = None
+        self.inducers: Optional[Dict[str, np.ndarray]] = None  # e.g., {'IPTG': np.array([1.0, 2.0, 3.0])}
+        self.other_modifications: Optional[Dict[str, np.ndarray]] = None
         self.is_blank: bool = False
         self.is_control: bool = False
 
@@ -129,7 +129,7 @@ class Sample:
         n_measurements = len(self.time_series)
         time_info = f", {len(self.time)}tp" if self.time is not None else ""
         conc_info = f", {len(self.concentrations)}conc" if self.concentrations is not None else ""
-        return f"Sample({self.sample_type}, {n_wells}wells, {n_measurements}meas{time_info}{conc_info})"
+        return f"Sample({self.name}, {n_wells}wells, {n_measurements}meas{time_info}{conc_info})"
 
     @property
     def condition_key(self) -> tuple:
@@ -138,7 +138,7 @@ class Sample:
         Returns (medium, antibiotics, plate_id, frozenset(inducers.items())).
         """
         return (self.medium, self.antibiotics, self.plate_id,
-                frozenset(self.inducers.items()))
+                frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items()))
 
     def condition_key_no_inducers(self) -> tuple:
         """Return condition key without inducer info, for match_inducers=False."""
@@ -152,11 +152,12 @@ class Sample:
         # Set properties from first well
         first_well = self.wells[0]
         self.medium = first_well.medium
-        self.antibiotics = first_well.antibiotics
+        self.antibiotics = dict(first_well.antibiotics) if first_well.antibiotics else {}
         self.inducers = dict(first_well.inducers) if first_well.inducers else {}
-        self.modifications = first_well.modifications
+        self.other_modifications = dict(first_well.other_modifications) if first_well.other_modifications else {}
         self.is_blank = first_well.is_blank
         self.is_control = first_well.is_control
+        self.plate_id = first_well.plate_id
 
         # Set time points from first well
         if first_well.time_points is not None:

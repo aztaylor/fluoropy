@@ -47,9 +47,22 @@ class Well:
         self.sample_type: Optional[str] = None
         self.concentration: Optional[float] = None
         self.medium: Optional[str] = None
-        self.antibiotics: Optional[str] = None
-        self.inducers: Dict[str, float] = {}
-        self.modifications: Optional[List[str]] = None
+
+        # Molecule concentrations (without units in names)
+        self.antibiotics: Dict[str, float] = {}  # e.g., {'Kan': 50.0, 'Chlor': 34.0}
+        self.inducers: Dict[str, float] = {}  # e.g., {'aTc': 200.0, 'IPTG': 0.5}
+        self.other_modifications: Dict[str, float] = {}  # e.g., {'supplement': 1.0}
+
+        # Units for each molecule
+        self.antibiotics_units: Dict[str, str] = {}  # e.g., {'Kan': 'µg/mL', 'Chlor': 'µg/mL'}
+        self.inducers_units: Dict[str, str] = {}  # e.g., {'aTc': 'ng/mL', 'IPTG': 'mM'}
+        self.other_modifications_units: Dict[str, str] = {}  # e.g., {'supplement': 'g/L'}
+
+        # Strain modifications (non-chemical)
+        self.strain_modifications: Optional[List[str]] = None
+
+        # Molecule of interest (which molecule's concentration is "the" concentration)
+        self.moi: Optional[str] = None
 
         # Well classification
         self.is_blank: bool = False
@@ -63,7 +76,7 @@ class Well:
         self.time_series: Dict[str, np.ndarray] = {}  # Raw time series data
         self.time_points: Optional[np.ndarray] = None
 
-        plate_id: None
+        self.plate_id: Optional[str] = None  # To be set when added to a plate
 
         # Metadata storage
         self.metadata: Dict[str, Any] = {}
@@ -77,11 +90,20 @@ class Well:
     # BASIC INFORMATION METHODS
     # ======================================================================
 
-    def set_sample_info(self, sample_type: str, concentration: Optional[float] = None,
-                       medium: Optional[str] = None, modifications: Optional[List[str]] = None,
-                       is_blank: bool = False, is_control: bool = False,
-                       antibiotics: Optional[str] = None,
-                       inducers: Optional[Dict[str, float]] = None):
+    def set_sample_info(self, sample_type: str,
+                        concentration: Optional[float] = None,
+                        medium: Optional[str] = None,
+                        antibiotics: Optional[Dict[str, float]] = None,
+                        inducers: Optional[Dict[str, float]] = None,
+                        moi: Optional[str] = None,
+                        other_modifications: Optional[Dict[str, float]] = None,
+                        strain_modifications: Optional[List[str]] = None,
+                        antibiotics_units: Optional[Dict[str, str]] = None,
+                        inducers_units: Optional[Dict[str, str]] = None,
+                        other_modifications_units: Optional[Dict[str, str]] = None,
+                        is_blank: bool = False,
+                        is_control: bool = False):
+
         """
         Set sample information for the well.
 
@@ -93,31 +115,122 @@ class Well:
             Concentration of the sample
         medium : str, optional
             Growth medium used
-        modifications : List[str], optional
-            List of genetic or chemical modifications
+        antibiotics : Dict[str, float], optional
+            Antibiotic name to concentration mapping (e.g., {'Kan': 50.0, 'Chlor': 34.0})
+        inducers : Dict[str, float], optional
+            Inducer name to concentration mapping (e.g., {'aTc': 200.0, 'IPTG': 0.5})
+        moi : str, optional
+            Molecule of interest for this well (e.g., 'aTc') - determines primary concentration
+        other_modifications : Dict[str, float], optional
+            Other modifications with concentrations (e.g., {'supplement': 1.0})
+        strain_modifications : List[str], optional
+            List of strain modifications
+        antibiotics_units : Dict[str, str], optional
+            Units for each antibiotic (e.g., {'Kan': 'µg/mL', 'Chlor': 'µg/mL'})
+        inducers_units : Dict[str, str], optional
+            Units for each inducer (e.g., {'aTc': 'ng/mL', 'IPTG': 'mM'})
+        other_modifications_units : Dict[str, str], optional
+            Units for each modification (e.g., {'supplement': 'g/L'})
         is_blank : bool, default False
             Whether this well is a blank control
         is_control : bool, default False
             Whether this well is a control
-        antibiotics : str, optional
-            Antibiotic condition string (e.g., 'Kan 50 µg/mL / Chlor 34 µg/mL')
-        inducers : Dict[str, float], optional
-            Inducer name to concentration mapping (e.g., {'aTc_ng_mL': 200.0})
         """
         self.sample_type = sample_type
-        self.concentration = concentration
         self.medium = medium
-        self.modifications = modifications or []
+        self.moi = moi
+        self.strain_modifications = strain_modifications
         self.is_blank = is_blank
         self.is_control = is_control
-        if antibiotics is not None:
-            self.antibiotics = antibiotics
-        if inducers is not None:
-            self.inducers = dict(inducers)
 
-    def set_concentration(self, concentration: float):
-        """Set the concentration for this well."""
-        self.concentration = concentration
+        # Set molecule concentrations
+        if antibiotics is not None:
+            if not isinstance(antibiotics, dict):
+                raise ValueError(f"Antibiotics should be a dict. Got: {type(antibiotics)}")
+            self.antibiotics.update(antibiotics)
+
+        if inducers is not None:
+            if not isinstance(inducers, dict):
+                raise ValueError(f"Inducers should be a dict. Got: {type(inducers)}")
+            self.inducers.update(inducers)
+
+        if other_modifications is not None:
+            if not isinstance(other_modifications, dict):
+                raise ValueError(f"Other modifications should be a dict. Got: {type(other_modifications)}")
+            self.other_modifications.update(other_modifications)
+
+        # Set molecule units
+        if antibiotics_units is not None:
+            if not isinstance(antibiotics_units, dict):
+                raise ValueError(f"Antibiotics units should be a dict. Got: {type(antibiotics_units)}")
+            self.antibiotics_units.update(antibiotics_units)
+
+        if inducers_units is not None:
+            if not isinstance(inducers_units, dict):
+                raise ValueError(f"Inducers units should be a dict. Got: {type(inducers_units)}")
+            self.inducers_units.update(inducers_units)
+
+        if other_modifications_units is not None:
+            if not isinstance(other_modifications_units, dict):
+                raise ValueError(f"Other modifications units should be a dict. Got: {type(other_modifications_units)}")
+            self.other_modifications_units.update(other_modifications_units)
+
+        self._set_concentration()
+
+    def _set_concentration(self):
+        """Set the concentration for this well first based on the provided
+        'concentration' parameter, then based on 'moi' if provided, and finally
+        based on the the first inducer, antibiotic, or other modificationif present. This method ensures that only one source of concentration information is used to avoid ambiguity.
+
+        Raises:
+            ValueError: _description_
+            ValueError: _description_
+        """
+        if self.concentration is not None and self.moi is not None:
+            raise ValueError("Cannot provide both 'concentration' and 'moi' parameters. Please provide only one to avoid ambiguity.")
+        elif self.concentration is not None:
+            self.concentration = self.concentration
+        elif self.moi is not None:
+            if self.moi in self.inducers.keys():
+                self.concentration = self.inducers[self.moi]
+            elif self.moi in self.antibiotics.keys():
+                self.concentration = self.antibiotics[self.moi]
+            elif self.moi in self.other_modifications.keys():
+                self.concentration = self.other_modifications[self.moi]
+            else:
+                raise ValueError(f"MOI '{self.moi}' not found in inducers, antibiotics, or other modifications for this well.\n Current inducers: {self.inducers}\n Current antibiotics: {self.antibiotics}\n Current modifications: {self.other_modifications}")
+        elif len(self.inducers) == 1:
+            self.concentration = self.inducers[list(self.inducers.keys())[0]]
+        elif len(self.antibiotics) == 1:
+            self.concentration = self.antibiotics[list(self.antibiotics.keys())[0]]
+        elif len(self.other_modifications) == 1:
+            self.concentration = self.other_modifications[list(self.other_modifications.keys())[0]]
+
+
+    def set_concentration_molecule(self, molecule: str):
+        """Set the concentration for this well based on the molecule of
+        interest. Can be members of antibiotics, inducers, or other
+        modifications which have associated concentration values.
+
+        Parameters
+        ----------
+        molecule : str
+            Name of the molecule to set concentration for (e.g., 'aTc', 'Kan')
+        """
+        if molecule in self.inducers:
+            self.concentration = self.inducers[molecule]
+        elif molecule in self.antibiotics:
+            self.concentration = self.antibiotics[molecule]
+        elif molecule in self.other_modifications:
+            self.concentration = self.other_modifications[molecule]
+        else:
+            raise ValueError(
+                f"Molecule '{molecule}' not found in any molecule dictionary.\n"
+                f"  Inducers: {self.inducers}\n"
+                f"  Antibiotics: {self.antibiotics}\n"
+                f"  Other modifications: {self.other_modifications}"
+            )
+        self.moi = molecule
 
     def get_concentration(self) -> Optional[float]:
         """Get the concentration for this well."""
@@ -127,10 +240,15 @@ class Well:
     def condition_key(self) -> tuple:
         """Return a hashable key representing this well's experimental condition.
 
-        Returns (medium, antibiotics, frozenset(inducers.items())).
+        Returns (medium, frozenset(antibiotics), frozenset(inducers), frozenset(other_modifications)).
         Used for matching blanks to samples in SampleFrame.
         """
-        return (self.medium, self.antibiotics, frozenset(self.inducers.items()))
+        return (
+            self.medium,
+            frozenset(self.antibiotics.items()) if self.antibiotics else frozenset(),
+            frozenset(self.inducers.items()) if self.inducers else frozenset(),
+            frozenset(self.other_modifications.items()) if self.other_modifications else frozenset()
+        )
 
     # ======================================================================
     # EXCLUSION METHODS

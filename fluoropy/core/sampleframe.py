@@ -28,7 +28,9 @@ class SampleFrame:
         Dictionary mapping sample IDs to Sample objects
     """
 
-    def __init__(self, plates: Union[Plate, List[Plate]], keep_controls_separate: bool = False):
+    def __init__(self, plates: Union[Plate, List[Plate]],
+                 ignored_sample_types: Optional[List[str]] = None,
+                 keep_controls_separate: bool = False):
         """
         Initialize SampleFrame from plate(s).
 
@@ -46,6 +48,7 @@ class SampleFrame:
             plates = [plates]
         self.plates = plates
         self.keep_controls_separate = keep_controls_separate
+        self.ignored_sample_types = ignored_sample_types or []
 
         # Generate frame name
         if len(plates) == 1:
@@ -98,8 +101,8 @@ class SampleFrame:
         return sample_id in self.samples
 
     def __iter__(self):
-        """Iterate over sample IDs."""
-        return iter(self.samples.keys())
+        """Iterate over samples."""
+        return iter(self.samples.values())
 
     def __len__(self) -> int:
         """Number of samples in frame."""
@@ -230,7 +233,7 @@ class SampleFrame:
 
             # Group wells by sample type
             for well in wells:
-                if well.sample_type is not None and not well.is_excluded():
+                if well.sample_type is not None and not well.is_excluded() and str(well.sample_type) not in self.ignored_sample_types:
                     # Determine grouping key
                     if self.keep_controls_separate and well.is_control:
                         # For controls, use sample_type + plate identifier

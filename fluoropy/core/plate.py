@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any, Union
 import numpy as np
 import pandas as pd
 from .well import Well
+from ..utils.import_data import import_results
 
 
 class Plate:
@@ -22,7 +23,8 @@ class Plate:
     Examples:
     --------
     >>> plate = Plate(plate_format="96", name="experiment_001")
-    >>> plate['A1'].set_sample_info("sample_1", concentration=10.0)
+    >>> plate['A1'].sample_type = "sample_1"
+    >>> plate['A1'].concentration = 10.0
     >>> plate['A1'].add_time_series("OD600", [0.1, 0.15, 0.2])
     >>> print(plate['A1'].sample_type)  # "sample_1"
     >>>
@@ -37,7 +39,23 @@ class Plate:
 
     def __init__(self,
                  plate_format: str = "96",
-                 name: Optional[str] = None):
+                 name: Optional[str] = None,
+                 data_file: Optional[str] = None,
+                 sample_layout: Optional[str] = None,
+                 concentration_layout: Optional[str] = None,
+                 media_layout: Optional[str] = None,
+                 antibiotic_layouts: Optional[Dict[str, str]] = None,
+                 inducer_layouts: Optional[Dict[str, str]] = None,
+                 other_modification_layouts: Optional[Dict[str, str]] = None,
+                 primary_molecule: Optional[str] = None,
+                 antibiotics_units: Optional[Dict[str, str]] = None,
+                 inducers_units: Optional[Dict[str, str]] = None,
+                 other_modifications_units: Optional[Dict[str, str]] = None,
+                 run_time: Optional[float] = None,
+                 sampling_rate: Optional[float] = None,
+                 read_labels: Optional[List[str]] = None,
+                 controls: Optional[List[str]] = None,
+                 blanks: Optional[List[str]] = None):
         """
         Initialize a Plate object.
 
@@ -47,6 +65,43 @@ class Plate:
             Plate format: "96", "384", "1536"
         name : str, optional
             Name or identifier for this plate
+        data_file : str, optional
+            Path to plate reader data file (Gen5 txt format)
+        sample_layout : str, optional
+            Path to sample layout CSV file (grid format with well positions)
+        concentration_layout : str, optional
+            Path to explicit concentration layout CSV file. If provided, takes priority
+            over concentrations derived from inducers.
+        media_layout : str, optional
+            Path to media layout CSV file
+        antibiotic_layouts : Dict[str, str], optional
+            Dictionary mapping antibiotic names to their concentration layout CSV paths.
+            e.g., {'Kan': 'layouts/kan.csv', 'Chlor': 'layouts/chlor.csv'}
+        inducer_layouts : Dict[str, str], optional
+            Dictionary mapping inducer names (without units) to concentration layout CSV paths.
+            e.g., {'aTc': 'layouts/atc.csv', 'IPTG': 'layouts/iptg.csv'}
+        other_modification_layouts : Dict[str, str], optional
+            Dictionary mapping other modification names to concentration layout CSV paths.
+        primary_molecule : str, optional
+            Name of the molecule to use as primary concentration (molecule of interest).
+            Can be from antibiotics, inducers, or other_modifications.
+            If not specified, uses first molecule found (priority: inducers > antibiotics > other).
+            Ignored if concentration_layout is provided.
+        antibiotics_units : Dict[str, str], optional
+            Units for each antibiotic. e.g., {'Kan': 'µg/mL', 'Chlor': 'µg/mL'}
+        inducers_units : Dict[str, str], optional
+            Units for each inducer. e.g., {'aTc': 'ng/mL', 'IPTG': 'mM'}
+        other_modifications_units : Dict[str, str], optional
+            Units for other modifications.
+        run_time : float, optional
+            Total reader run time in hours (required if data_file is provided)
+        sampling_rate : float, optional
+            Sampling rate in hours (required if data_file is provided)
+        read_labels : List[str], optional
+            List of read labels to extract from data file (e.g., ["Read 1:600", "Read 2:480,510"])
+            Required if data_file is provided
+        controls : List[str], optional
+            List of control sample names for automatic classification
         """
         self.format = plate_format
         self.name = name
@@ -75,6 +130,27 @@ class Plate:
         # Initialize all wells for the plate format
         self._initialize_wells()
 
+        # Load data if data_file and sample_layout are provided
+        if data_file is not None and sample_layout is not None:
+            self._load_data_and_layouts(
+                data_file=data_file,
+                sample_layout=sample_layout,
+                concentration_layout=concentration_layout,
+                media_layout=media_layout,
+                antibiotic_layouts=antibiotic_layouts,
+                inducer_layouts=inducer_layouts,
+                other_modification_layouts=other_modification_layouts,
+                primary_molecule=primary_molecule,
+                antibiotics_units=antibiotics_units,
+                inducers_units=inducers_units,
+                other_modifications_units=other_modifications_units,
+                run_time=run_time,
+                sampling_rate=sampling_rate,
+                read_labels=read_labels,
+                controls=controls or [],
+                blanks=blanks or []
+            )
+
     def _initialize_wells(self):
         """Initialize all wells for the plate format."""
         for row in range(self.rows):
@@ -82,6 +158,222 @@ class Plate:
                 well_id = f"{chr(ord('A') + row)}{col + 1}"
                 self.wells[well_id] = Well(well_id, row, col)
                 self.wells[well_id].plate_id = self.plate_id  # Assign plate_id to each well
+
+    def _load_data_and_layouts(self, data_file: str, sample_layout: str,
+                              concentration_layout: Optional[str],
+                              media_layout: Optional[str],
+                              antibiotic_layouts: Optional[Dict[str, str]],
+                              inducer_layouts: Optional[Dict[str, str]],
+                              other_modification_layouts: Optional[Dict[str, str]],
+                              primary_molecule: Optional[str],
+                              antibiotics_units: Optional[Dict[str, str]],
+                              inducers_units: Optional[Dict[str, str]],
+                              other_modifications_units: Optional[Dict[str, str]],
+                              run_time: Optional[float],
+                              sampling_rate: Optional[float],
+                              read_labels: Optional[List[str]],
+                              controls: Optional[List[str]],
+                              blanks: Optional[List[str]]):
+        """
+        Load data from file and apply layout configurations.
+
+        Parameters
+        ----------
+        data_file : str
+            Path to plate reader data file
+        sample_layout : str
+            Path to sample layout CSV
+        concentration_layout : str, optional
+            Path to explicit concentration layout CSV (Priority 1)
+        media_layout : str, optional
+            Path to media layout CSV
+        antibiotic_layouts : Dict[str, str], optional
+            Dictionary of antibiotic names to CSV paths
+        inducer_layouts : Dict[str, str], optional
+            Dictionary of inducer names to CSV paths
+        other_modification_layouts : Dict[str, str], optional
+            Dictionary of other modification names to CSV paths
+        primary_molecule : str, optional
+            Molecule to use as primary concentration (Priority 2)
+        antibiotics_units : Dict[str, str], optional
+            Units for antibiotics
+        inducers_units : Dict[str, str], optional
+            Units for inducers
+        other_modifications_units : Dict[str, str], optional
+            Units for other modifications
+        run_time : float, optional
+            Total run time in hours
+        sampling_rate : float, optional
+            Sampling rate in hours
+        read_labels : List[str], optional
+            List of read labels to extract
+        controls : List[str], optional
+            List of control sample names
+        blanks : List[str], optional
+            List of blank sample names
+        """
+        # Validate required parameters for data import
+        if run_time is None or sampling_rate is None or read_labels is None:
+            raise ValueError(
+                "When data_file is provided, run_time, sampling_rate, and read_labels "
+                "must also be provided"
+            )
+
+        print(f"Loading data from {data_file}...")
+
+        # Import plate reader data
+        data_dict, time_dict, meta_data = import_results(
+            data_file=data_file,
+            n_rows=self.rows,
+            n_cols=self.cols,
+            run_time=run_time,
+            sampling_rate=sampling_rate,
+            read_labels=read_labels
+        )
+
+        # Store metadata
+        self.metadata.update(meta_data)
+
+        # Load sample layout
+        sample_map = self._read_grid_csv(sample_layout)
+
+        # Load all molecule layouts into dictionaries
+        # Each dict maps molecule_name -> 2D grid of concentrations
+        all_molecule_grids = {}
+
+        # Load inducers
+        if inducer_layouts:
+            for inducer_name, layout_path in inducer_layouts.items():
+                print(f"Loading inducer '{inducer_name}' from {layout_path}...")
+                all_molecule_grids[inducer_name] = self._read_grid_csv(layout_path)
+
+        # Load antibiotics
+        if antibiotic_layouts:
+            for antibiotic_name, layout_path in antibiotic_layouts.items():
+                print(f"Loading antibiotic '{antibiotic_name}' from {layout_path}...")
+                all_molecule_grids[antibiotic_name] = self._read_grid_csv(layout_path)
+
+        # Load other modifications
+        if other_modification_layouts:
+            for mod_name, layout_path in other_modification_layouts.items():
+                print(f"Loading modification '{mod_name}' from {layout_path}...")
+                all_molecule_grids[mod_name] = self._read_grid_csv(layout_path)
+
+        # Build concentration map with priority hierarchy
+        conc_map = np.zeros((self.rows, self.cols))
+        primary_mol_used = None
+
+        # Priority 1: Explicit concentration layout
+        if concentration_layout is not None:
+            print(f"Using explicit concentration layout as primary concentration...")
+            conc_grid = self._read_grid_csv(concentration_layout)
+            for row in range(min(conc_grid.shape[0], self.rows)):
+                for col in range(min(conc_grid.shape[1], self.cols)):
+                    try:
+                        conc_map[row, col] = float(conc_grid[row, col])
+                    except (ValueError, TypeError):
+                        conc_map[row, col] = 0.0
+
+        # Priority 2: Primary molecule (molecule of interest)
+        elif primary_molecule is not None and primary_molecule in all_molecule_grids:
+            print(f"Using '{primary_molecule}' as primary concentration...")
+            mol_grid = all_molecule_grids[primary_molecule]
+            primary_mol_used = primary_molecule
+            for row in range(min(mol_grid.shape[0], self.rows)):
+                for col in range(min(mol_grid.shape[1], self.cols)):
+                    try:
+                        conc_map[row, col] = float(mol_grid[row, col])
+                    except (ValueError, TypeError):
+                        conc_map[row, col] = 0.0
+
+        # Priority 3: First molecule (fallback, priority: inducers > antibiotics > other)
+        elif all_molecule_grids:
+            # Try to find first molecule in priority order
+            first_mol_name = None
+            if inducer_layouts:
+                first_mol_name = next(iter(inducer_layouts.keys()))
+            elif antibiotic_layouts:
+                first_mol_name = next(iter(antibiotic_layouts.keys()))
+            elif other_modification_layouts:
+                first_mol_name = next(iter(other_modification_layouts.keys()))
+
+            if first_mol_name:
+                print(f"Using first molecule '{first_mol_name}' as primary concentration...")
+                mol_grid = all_molecule_grids[first_mol_name]
+                primary_mol_used = first_mol_name
+                for row in range(min(mol_grid.shape[0], self.rows)):
+                    for col in range(min(mol_grid.shape[1], self.cols)):
+                        try:
+                            conc_map[row, col] = float(mol_grid[row, col])
+                        except (ValueError, TypeError):
+                            conc_map[row, col] = 0.0
+
+        # Priority 4: No concentrations (conc_map already initialized to zeros)
+
+        # Load data into wells using load_from_arrays
+        self.load_from_arrays(
+            sample_map=sample_map,
+            conc_map=conc_map,
+            data_dict=data_dict,
+            time_dict=time_dict,
+            controls=controls,
+            blanks=blanks
+        )
+
+        # Now populate wells with molecule concentrations and units
+        for row in range(self.rows):
+            for col in range(self.cols):
+                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well = self.wells[well_id]
+
+                # Set molecule of interest (if primary_mol_used was determined)
+                if primary_mol_used:
+                    well.moi = primary_mol_used
+
+                # Populate inducers
+                if inducer_layouts:
+                    for inducer_name, _ in inducer_layouts.items():
+                        grid = all_molecule_grids[inducer_name]
+                        try:
+                            value = float(grid[row, col])
+                            well.inducers[inducer_name] = value
+                        except (ValueError, TypeError, IndexError):
+                            well.inducers[inducer_name] = 0.0
+
+                # Populate antibiotics
+                if antibiotic_layouts:
+                    for antibiotic_name, _ in antibiotic_layouts.items():
+                        grid = all_molecule_grids[antibiotic_name]
+                        try:
+                            value = float(grid[row, col])
+                            well.antibiotics[antibiotic_name] = value
+                        except (ValueError, TypeError, IndexError):
+                            well.antibiotics[antibiotic_name] = 0.0
+
+                # Populate other modifications
+                if other_modification_layouts:
+                    for mod_name, _ in other_modification_layouts.items():
+                        grid = all_molecule_grids[mod_name]
+                        try:
+                            value = float(grid[row, col])
+                            well.other_modifications[mod_name] = value
+                        except (ValueError, TypeError, IndexError):
+                            well.other_modifications[mod_name] = 0.0
+
+                # Set units
+                if inducers_units:
+                    well.inducers_units.update(inducers_units)
+                if antibiotics_units:
+                    well.antibiotics_units.update(antibiotics_units)
+                if other_modifications_units:
+                    well.other_modifications_units.update(other_modifications_units)
+
+        # Load media layout (still uses load_layout_csv since it's a string)
+        if media_layout is not None:
+            print(f"Loading media layout from {media_layout}...")
+            self.load_layout_csv(media_layout, 'media')
+
+        print(f"✅ Plate '{self.name}' fully loaded and configured")
 
     # ======================================================================
     # INDEXING AND ITERATION METHODS
@@ -367,7 +659,7 @@ class Plate:
     # ======================================================================
 
     def load_from_arrays(self, sample_map: np.ndarray, conc_map: Union[np.ndarray, List[List[float]]],
-                        data_dict: Dict[str, np.ndarray], time_dict: Dict[str, np.ndarray], controls: List[str] = []):
+                        data_dict: Dict[str, np.ndarray], time_dict: Dict[str, np.ndarray], controls: List[str] = [], blanks: List[str] = []):
         """
         Load data from numpy arrays (compatible with platereadertools output)
 
@@ -419,18 +711,19 @@ class Plate:
                     concentration = None
 
                 # Determine well classification
-                is_blank = "Blank" in str(sample_type) if sample_type else False
-                is_control = ("NC" in str(sample_type) or "Control" in str(sample_type) or
-                             "WT" in str(sample_type) or sample_type in controls) if sample_type else False
+                is_blank = str(sample_type) in blanks if blanks and sample_type else False
+                is_control = str(sample_type) in controls if controls and sample_type else False
 
+                if is_blank:
+                    print(f"Identified blank well: {well_id} (sample type: {sample_type})")
+                if is_control:
+                    print(f"Identified control well: {well_id} (sample type: {sample_type})")
 
-                # Set well attributes using the set_sample_info method
-                well.set_sample_info(
-                    sample_type=sample_type,
-                    concentration=concentration,
-                    is_blank=is_blank,
-                    is_control=is_control
-                )
+                # Set well attributes directly
+                well.sample_type = sample_type
+                well.concentration = concentration
+                well.is_blank = is_blank
+                well.is_control = is_control
 
                 # Add time series data for each measurement type
                 for measurement_type, data_array in data_dict.items():
