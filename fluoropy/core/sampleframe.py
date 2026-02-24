@@ -29,8 +29,7 @@ class SampleFrame:
     """
 
     def __init__(self, plates: Union[Plate, List[Plate]],
-                 ignored_sample_types: Optional[List[str]] = None,
-                 keep_controls_separate: bool = False):
+                 ignored_sample_types: Optional[List[str]] = None):
         """
         Initialize SampleFrame from plate(s).
 
@@ -38,16 +37,13 @@ class SampleFrame:
         ----------
         plates : Plate or List[Plate]
             Single plate or list of plates to process
-        keep_controls_separate : bool, default False
-            If True, control samples from different plates are kept separate
-            (named as 'control_plate1', 'control_plate2', etc.). If False,
-            controls with the same sample_type are merged across plates.
+        ignored_sample_types : List[str], optional
+            Sample types to ignore during initialization
         """
         # Ensure plates is a list
         if not isinstance(plates, list):
             plates = [plates]
         self.plates = plates
-        self.keep_controls_separate = keep_controls_separate
         self.ignored_sample_types = ignored_sample_types or []
 
         # Generate frame name
@@ -220,10 +216,11 @@ class SampleFrame:
         Initialize Sample objects from wells across all plates.
         Groups wells by sample_type and creates Sample objects.
 
-        If keep_controls_separate=True, control samples from different plates
-        are kept separate with unique identifiers.
+        All samples (including controls and blanks) are merged across plates
+        by their sample_type. Per-plate matching is handled at calculation time
+        by filtering wells by plate_id.
         """
-        # Dictionary to temporarily group wells by sample_type (and plate for controls)
+        # Dictionary to temporarily group wells by sample_type
         sample_groups = defaultdict(list)
 
         # Collect all wells from all plates
@@ -234,15 +231,10 @@ class SampleFrame:
             # Group wells by sample type
             for well in wells:
                 if well.sample_type is not None and not well.is_excluded() and str(well.sample_type) not in self.ignored_sample_types:
-                    # Determine grouping key
-                    if self.keep_controls_separate and well.is_control:
-                        # For controls, use sample_type + plate identifier
-                        group_key = f"{well.sample_type}_{plate_id}"
-                    else:
-                        # For non-controls (or when not separating), use just sample_type
-                        group_key = well.sample_type
-
+                    # Always merge by sample_type (including blanks and controls)
+                    group_key = well.sample_type
                     sample_groups[group_key].append(well)
+                    
 
         # Create Sample objects for each sample type
         for sample_id, wells in sample_groups.items():
@@ -252,10 +244,13 @@ class SampleFrame:
                 wells_sorted = sorted(wells, key=lambda w: (w.row, w.column))
 
                 # Use the original sample_type from the wells for the Sample object
-                # (the sample_id might have plate identifier appended for controls)
+                # (the sample_id might have plate identifier appended for blanks)
                 original_sample_type = wells_sorted[0].sample_type
                 sample = Sample(original_sample_type, wells_sorted)
-                sample.plate_id = plate_id  # Store plate ID if needed
+
+                # Set plate_id from wells (will be set in Sample._initialize_from_wells())
+                # For multi-plate samples (controls), this will be from first well
+                # For single-plate samples (blanks, test samples), this will be correct
                 self.samples[sample_id] = sample
 
     def _get_wells_from_plate(self, plate: Plate) -> List[Well]:
@@ -272,6 +267,58 @@ class SampleFrame:
             print(f"Warning: Cannot extract wells from plate {plate}")
 
         return wells
+
+    def _create_mean_blank(self, blank_sample: 'Sample', measurement_types: List[str]) -> 'Sample':
+        """
+        Create a blank Sample with mean values across all wells.
+
+        This is used when pooling blanks across plates to avoid broadcasting issues.
+
+        Parameters
+        ----------
+        blank_sample : Sample
+            The original blank sample with multiple wells
+        measurement_types : List[str]
+            Measurement types to include
+
+        Returns
+        -------
+        Sample
+            A new Sample with a single "mean well" containing averaged blank values
+        """
+        from .well import Well
+
+        # Create a dummy well with mean blank values
+        mean_well = Well("mean_blank", 0, 0)
+        mean_well.plate_id = blank_sample.plate_id
+        mean_well.medium = blank_sample.medium
+        mean_well.antibiotics = blank_sample.antibiotics
+        mean_well.inducers = blank_sample.inducers
+        mean_well.is_blank = True
+
+        # Calculate mean time series for each measurement type
+        for measurement_type in measurement_types:
+            if measurement_type in blank_sample.time_series:
+                # Get time series data: (n_timepoints, n_replicates, n_concentrations)
+                data = blank_sample.time_series[measurement_type]
+
+                # Average across replicates (axis=1)
+                mean_data = np.nanmean(data, axis=1)  # Shape: (n_timepoints, n_concentrations)
+
+                # For a blank with one concentration, take the first (and only) concentration
+                if mean_data.shape[1] == 1:
+                    mean_data = mean_data[:, 0]  # Shape: (n_timepoints,)
+
+                mean_well.time_series[measurement_type] = mean_data
+
+        # Set time points
+        if blank_sample.time is not None:
+            mean_well.time_points = blank_sample.time.copy()
+
+        # Create a Sample with this single mean well
+        mean_blank_sample = Sample(blank_sample.name, [mean_well])
+
+        return mean_blank_sample
 
     def _calculate_data_statistics(self, sample: 'Sample', data_source: str,
                                   measurements: Optional[List[str]] = None,
@@ -295,34 +342,39 @@ class SampleFrame:
         sample.calculate_data_source_statistics(data_source, measurements, error_type)
 
     def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None,
+                                              pool_controls: bool = False,
                                               match_inducers: bool = True) -> None:
         """
         Calculate blank-subtracted time series data for individual samples.
 
         For each sample, subtracts the blank matching the same experimental
-        condition (media, antibiotics, plate_id, and optionally inducers).
+        condition (media, antibiotics, optionally plate_id, and optionally inducers).
         Stores result in sample.blanked_data attribute.
 
         Parameters
         ----------
         measurement_types : List[str], optional
             Measurement types to process. If None, processes all available.
+        pool_controls : bool, default False
+            If False, blanks must be on same plate (per-plate matching)
+            If True, pool blanks across all plates (ignore plate_id)
         match_inducers : bool, default True
             If True, blanks must also match on inducer concentrations.
-            If False, only media, antibiotics, and plate_id are used.
+            If False, only media, antibiotics, [plate_id], and modifications are used.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
 
         # Group blanks by condition key for efficient lookup
+        # Note: Blank keys always exclude plate_id since blanks are merged across plates
         blanks_by_condition: Dict[tuple, 'Sample'] = {}
 
         for sample_id, sample in self.samples.items():
             if sample.is_blank:
-                if match_inducers:
-                    key = sample.condition_key
-                else:
-                    key = sample.condition_key_no_inducers()
+                key = sample.get_matching_key(
+                    pool_across_plates=True,  # Always True for blanks (they're merged)
+                    match_inducers=match_inducers
+                )
                 blanks_by_condition[key] = sample
 
         # Calculate blank-subtracted data for non-blank samples
@@ -330,21 +382,36 @@ class SampleFrame:
             if sample.is_blank:
                 continue
 
-            # Find matching blank
-            if match_inducers:
-                blank_key = sample.condition_key
-            else:
-                blank_key = sample.condition_key_no_inducers()
+            # Find matching blank (always exclude plate_id since blanks are merged)
+            blank_key = sample.get_matching_key(
+                pool_across_plates=True,  # Always True for blank matching (blanks are merged)
+                match_inducers=match_inducers
+            )
             blank_sample = blanks_by_condition.get(blank_key)
 
             if blank_sample is None:
-                print(f"Warning: No blank found for {sample.sample_type} "
+                print(f"Warning: No blank found for {sample.name} "
                       f"(medium={sample.medium}, antibiotics={sample.antibiotics}, "
                       f"plate={sample.plate_id}, inducers={sample.inducers})")
                 continue
 
-            # Calculate blank-subtracted data
-            sample.calculate_blanked_data(blank_sample, measurement_types)
+            # If using per-plate matching, filter blank wells to only those from the same plate
+            if not pool_controls and blank_sample is not None:
+                # Filter blank wells by plate_id
+                matching_blank_wells = [w for w in blank_sample.wells if w.plate_id == sample.plate_id]
+
+                if not matching_blank_wells:
+                    print(f"Warning: No blank wells found on plate {sample.plate_id} for {sample.name}")
+                    continue
+
+                # Create a temporary Sample with only the matching wells
+                filtered_blank = Sample(blank_sample.name, matching_blank_wells)
+                sample.calculate_blanked_data(filtered_blank, measurement_types)
+            else:
+                # Use all blank wells (pooled across plates)
+                # Create a mean blank to avoid broadcasting issues with multiple replicates
+                mean_blank = self._create_mean_blank(blank_sample, measurement_types)
+                sample.calculate_blanked_data(mean_blank, measurement_types)
 
     def calculate_blank_subtracted_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
                                                          error_type: str = 'std') -> None:
@@ -387,7 +454,8 @@ class SampleFrame:
 
     def calculate_normalized_timeseries(self, od_measurement: str = 'OD600',
                                        alpha: float = 0.01,
-                                       measurement_types: Optional[List[str]] = None) -> None:
+                                       measurement_types: Optional[List[str]] = None,
+                                       pool_controls: bool = False) -> None:
         """
         Calculate normalized time series data using the form: read1 / (alpha + read2).
 
@@ -401,6 +469,10 @@ class SampleFrame:
             Normalization offset (alpha parameter)
         measurement_types : List[str], optional
             Measurement types to normalize. If None, processes all available.
+        pool_controls : bool, default False
+            If False, blanks must be on same plate (per-plate matching)
+            If True, pool blanks across all plates (ignore plate_id)
+            Only used if blanked data needs to be recalculated.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
@@ -414,7 +486,7 @@ class SampleFrame:
                 sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
                 sample.normalized_timeseries = sample.normalized_data
             else:
-                print(f"Warning: No blank-subtracted data for {sample.sample_type}. "
+                print(f"Warning: No blank-subtracted data for {sample.name}. "
                       f"Call calculate_blank_subtracted_timeseries() first. "
                       f"Using raw data for normalization.")
                 sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
@@ -462,7 +534,8 @@ class SampleFrame:
 
     def calculate_fold_change(self, measurement: str,
                               od_measurement: str = 'OD600',
-                              alpha: float = 0.01) -> None:
+                              alpha: float = 0.01,
+                              pool_controls: bool = False) -> None:
         """
         Calculate log fold change of samples by negative control at each timepoint.
 
@@ -485,11 +558,17 @@ class SampleFrame:
             OD measurement for normalization
         alpha : float, default 0.01
             Normalization offset
+        pool_controls : bool, default False
+            If False, use controls only from same plate (per-plate matching)
+            If True, pool controls across all plates
         """
         import pandas as pd
 
         # First ensure we have blank-subtracted and normalized data
-        self.calculate_blank_subtracted_timeseries([measurement, od_measurement])
+        self.calculate_blank_subtracted_timeseries(
+            [measurement, od_measurement],
+            pool_controls=pool_controls
+        )
         self.calculate_normalized_timeseries(od_measurement, alpha, [measurement])
 
         # Calculate fold change for each test sample
@@ -497,27 +576,37 @@ class SampleFrame:
             if sample.is_blank or sample.is_control:
                 continue
 
-            # Find matching negative control (same plate_id)
+            # Find matching negative control
             control = None
-            for cand_id, cand_sample in self.samples.items():
-                if cand_sample.is_control and cand_sample.plate_id == sample.plate_id:
-                    control = cand_sample
-                    break
-
-            if control is None:
-                print(f"Warning: No negative control found for {sample_id} on plate {sample.plate_id}")
-                continue
+            if pool_controls:
+                # Pool across plates - find first control (all controls are merged in one Sample)
+                for cand_id, cand_sample in self.samples.items():
+                    if cand_sample.is_control:
+                        control = cand_sample
+                        break
+                if control is None:
+                    print(f"Warning: No negative control found for {sample_id}")
+                    continue
+            else:
+                # Per-plate matching - find control on same plate
+                for cand_id, cand_sample in self.samples.items():
+                    if cand_sample.is_control and cand_sample.plate_id == sample.plate_id:
+                        control = cand_sample
+                        break
+                if control is None:
+                    print(f"Warning: No negative control found for {sample_id} on plate {sample.plate_id}")
+                    continue
 
             # Build fold change dataframe by processing individual replicates
             fold_change_data = self._calculate_individual_fold_changes(
-                sample, control, measurement, od_measurement, alpha
+                sample, control, measurement, od_measurement, alpha, pool_controls
             )
 
             sample.fold_change = fold_change_data
 
     def _calculate_individual_fold_changes(self, sample: 'Sample', control: 'Sample',
                                           measurement: str, od_measurement: str,
-                                          alpha: float) -> 'pd.DataFrame':
+                                          alpha: float, pool_controls: bool = False) -> 'pd.DataFrame':
         """
         Calculate fold change for individual replicates with proper normalization.
 
@@ -531,19 +620,36 @@ class SampleFrame:
         """
         import pandas as pd
 
-        # Find the blank samples for both sample and control
-        blank_sample_key = (sample.medium, sample.plate_id)
-        control_blank_key = (control.medium, control.plate_id)
-
-        # Get blanks
-        blanks_by_media_plate: Dict[Tuple[str, str], 'Sample'] = {}
+        # Find the blank samples for both sample and control using get_matching_key
+        # Note: Blank keys always exclude plate_id since blanks are merged across plates
+        blanks_by_key: Dict[tuple, 'Sample'] = {}
         for s in self.samples.values():
             if s.is_blank:
-                key = (s.medium, s.plate_id)
-                blanks_by_media_plate[key] = s
+                key = s.get_matching_key(pool_across_plates=True, match_inducers=False)
+                blanks_by_key[key] = s
 
-        blank = blanks_by_media_plate.get(blank_sample_key)
-        control_blank = blanks_by_media_plate.get(control_blank_key)
+        # Find blanks for sample and control (always use pool_across_plates=True for blank lookup)
+        blank_key = sample.get_matching_key(pool_across_plates=True, match_inducers=False)
+        blank = blanks_by_key.get(blank_key)
+
+        control_blank_key = control.get_matching_key(pool_across_plates=True, match_inducers=False)
+        control_blank = blanks_by_key.get(control_blank_key)
+
+        # Filter blank wells by plate_id if using per-plate matching
+        if not pool_controls:
+            if blank is not None:
+                matching_wells = [w for w in blank.wells if w.plate_id == sample.plate_id]
+                if matching_wells:
+                    blank = Sample(blank.name, matching_wells)
+                else:
+                    blank = None
+
+            if control_blank is not None:
+                matching_wells = [w for w in control_blank.wells if w.plate_id == control.plate_id]
+                if matching_wells:
+                    control_blank = Sample(control_blank.name, matching_wells)
+                else:
+                    control_blank = None
 
         # Group sample wells by concentration
         sample_wells_by_conc = {}

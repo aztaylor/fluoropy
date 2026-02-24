@@ -558,7 +558,8 @@ class Plate:
         self.global_time_points = np.array(time_points)
         for well in self.wells.values():
             if hasattr(well, 'time_points') and well.time_points is None:
-                well.time_points = self.global_time_points.copy()
+                time_points = self.global_time_points.copy()
+                well.time_points = time_points.reshape(-1)  # Ensure it's a 1D array
 
     def get_plate_matrix(self, value_type: str = "fluorescence") -> np.ndarray:
         """
@@ -736,6 +737,7 @@ class Plate:
 
                         # Get corresponding time points
                         time_points = time_dict.get(measurement_type)
+                        time_points = time_points.reshape(-1) # Ensure it's a 1D array
 
                         # Add time series to well
                         well.add_time_series(measurement_type, well_data, time_points)

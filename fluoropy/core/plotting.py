@@ -306,7 +306,8 @@ def plot_replicate_time_series(frame,
                                title: Optional[str] = None,
                                ylabel: Optional[str] = None,
                                xlabel: str = "Time (hours)",
-                               sharey: bool = True):
+                               sharey: bool = True,
+                               max_cols: int = 4) -> Tuple['matplotlib.figure.Figure', Dict[str, 'matplotlib.axes.Axes']]:
     """
     Plot time series curves for replicates of samples at each concentration.
 
@@ -411,12 +412,12 @@ def plot_replicate_time_series(frame,
 
     if figsize is None:
         n_cols = int(np.ceil(np.sqrt(n_subplots / 1.4)))
-        n_cols = max(2, min(n_cols, 8))
+        n_cols = max(max_cols, min(n_cols, 8))
         n_rows = int(np.ceil(n_subplots / n_cols))
         figsize = (n_cols * 3.5, n_rows * 3.5)
     else:
         n_cols = int(np.ceil(np.sqrt(n_subplots / 1.4)))
-        n_cols = max(2, min(n_cols, 8))
+        n_cols = max(max_cols, min(n_cols, 8))
         n_rows = int(np.ceil(n_subplots / n_cols))
 
     fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False, sharey=sharey)
@@ -452,7 +453,6 @@ def plot_replicate_time_series(frame,
             replicate_arrays = np.column_stack([w.time_series[measurement] for w in wells])
             mean_data = np.mean(replicate_arrays, axis=1)
             error_data = np.std(replicate_arrays, axis=1)
-
             ax.plot(time, mean_data, 'o-', linewidth=2.5,
                    markersize=6, label=f"{sample_id} mean", zorder=3)
 

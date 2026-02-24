@@ -8,7 +8,7 @@ __author__ = "Aleczander Taylor"
 __email__ = "aztaylor76@fastmail.com"
 
 # Import main modules/classes here for easy access
-from .core import Plate, Well, Sample, SampleFrame, Fluorophore, Assay
+from .core import Plate, Well, Sample, SampleFrame, Fluorophore, Assay, plotting
 from .core.fluorophore import fluorophore_db
 from .core.assay import EndpointAssay
 
