@@ -155,6 +155,64 @@ class Sample:
             frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
         )
 
+    def get_matching_key(self, pool_across_plates: bool = False,
+                         match_inducers: bool = True) -> tuple:
+        """
+        Get condition key for blank/control matching with flexible pooling.
+
+        This method builds a hashable key for matching blanks/controls to samples
+        based on experimental conditions. The key can optionally include or exclude
+        plate_id to enable per-plate or cross-plate pooling.
+
+        Parameters
+        ----------
+        pool_across_plates : bool, default False
+            If False, include plate_id in key (per-plate matching - current behavior)
+            If True, exclude plate_id from key (pool blanks/controls across all plates)
+        match_inducers : bool, default True
+            If True, include inducer concentrations in matching key
+            If False, exclude inducers (match only on medium, antibiotics, other_mods)
+
+        Returns
+        -------
+        tuple
+            Hashable key for matching: (medium, antibiotics, [plate_id], [inducers], other_mods)
+            Components in brackets are conditionally included.
+
+        Examples
+        --------
+        Per-plate blank matching (default):
+        >>> blank_key = sample.get_matching_key(pool_across_plates=False)
+
+        Cross-plate blank pooling:
+        >>> blank_key = sample.get_matching_key(pool_across_plates=True)
+
+        Match without inducers:
+        >>> blank_key = sample.get_matching_key(match_inducers=False)
+        """
+        # Start with medium and antibiotics (always included)
+        key_parts = [
+            self.medium,
+            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items())
+        ]
+
+        # Conditionally include plate_id for per-plate matching
+        if not pool_across_plates:
+            key_parts.append(self.plate_id)
+
+        # Conditionally include inducers
+        if match_inducers:
+            key_parts.append(
+                frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items())
+            )
+
+        # Always include other_modifications
+        key_parts.append(
+            frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
+        )
+
+        return tuple(key_parts)
+
     def _initialize_from_wells(self):
         """Initialize sample properties from wells."""
         if not self.wells:
@@ -225,8 +283,8 @@ class Sample:
             if n_timepoints is None:
                 continue
 
-            # Sort concentrations for consistent ordering
-            sorted_concentrations = sorted(concentration_groups.keys())
+            # Sort concentrations descending to match calculate_statistics() 'value' order
+            sorted_concentrations = sorted(concentration_groups.keys(), reverse=True)
             n_concentrations = len(sorted_concentrations)
 
             # Find max replicates per concentration to handle uneven data
