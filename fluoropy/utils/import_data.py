@@ -60,7 +60,7 @@ def import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float
 
             time_i = 0
 
-        elif len(read_line) > 1 and read_flag is not None and metadata_flag is None:
+        elif len(read_line) > 1 and read_flag is not None and metadata_flag is None and not read_line[0].startswith("Time"):
             element_index = 0
             row = 0
             col = 0
