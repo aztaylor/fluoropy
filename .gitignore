@@ -149,3 +149,4 @@ Archive
 .claude
 CLAUDE.md
 .gitignore
+tests/outputs
