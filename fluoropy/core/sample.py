@@ -227,10 +227,22 @@ class Sample:
         self.is_blank = first_well.is_blank
         self.is_control = first_well.is_control
         self.plate_id = first_well.plate_id
+        self.moi = first_well.moi
 
-        # Set time points from first well
-        if first_well.time_points is not None:
-            self.time = first_well.time_points.copy()
+        # Set time points from the well with the most non-zero entries, then
+        # strip trailing zeros (artifacts of pre-allocated import arrays)
+        best_time = None
+        best_count = -1
+        for well in self.wells:
+            if well.time_points is not None:
+                nonzero = int(np.count_nonzero(well.time_points))
+                if nonzero > best_count:
+                    best_count = nonzero
+                    best_time = well.time_points
+        if best_time is not None:
+            # Trim trailing zeros
+            last = np.max(np.nonzero(best_time)) + 1 if np.any(best_time != 0) else len(best_time)
+            self.time = best_time[:last].copy()
 
     def _populate_time_series(self, measurement_types: Optional[List[str]] = None):
         """
@@ -273,14 +285,17 @@ class Sample:
             if not concentration_groups:
                 continue
 
-            # Determine dimensions
-            n_timepoints = None
-            for data_list in concentration_groups.values():
-                if data_list:
-                    n_timepoints = len(data_list[0])
-                    break
+            # Determine dimensions — cap at len(self.time) to avoid trailing
+            # zeros from pre-allocated import arrays exceeding trimmed time axis
+            if self.time is not None:
+                n_timepoints = len(self.time)
+            else:
+                n_timepoints = 0
+                for data_list in concentration_groups.values():
+                    for data in data_list:
+                        n_timepoints = max(n_timepoints, len(data))
 
-            if n_timepoints is None:
+            if n_timepoints == 0:
                 continue
 
             # Sort concentrations descending to match calculate_statistics() 'value' order
@@ -297,7 +312,8 @@ class Sample:
             for conc_idx, concentration in enumerate(sorted_concentrations):
                 data_list = concentration_groups[concentration]
                 for rep_idx, data in enumerate(data_list):
-                    time_series_array[:, rep_idx, conc_idx] = data
+                    actual_len = min(len(data), n_timepoints)
+                    time_series_array[:actual_len, rep_idx, conc_idx] = data[:actual_len]
 
             self.time_series[measurement_type] = time_series_array
 

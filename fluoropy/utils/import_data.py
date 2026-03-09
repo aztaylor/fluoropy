@@ -7,12 +7,17 @@ Gen5 txt output format.
 
 import numpy as np
 
-def import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float, sampling_rate:float, read_labels = ["Read 1:600", "Read 2:480,510"])->dict:
+def import_results(data_file:str, run_time:float, sampling_rate:float,
+                   n_rows:int = 8,
+                   n_cols:list or int = 12,
+                   read_labels = ["Read 1:600", "Read 2:480,510"])->dict:
     '''
-    Creates a 3D array where the first dimension is represents the plate rows, the second represents the plate columns, and the third contains the timeseries data.
-    This is meant to be used with txt files exported for Biotek's Gen5 software with the following output parameters:
-        -Contents: Well data for each read plus OD600. No summary or data reduction information.
-        -Format: Can inlcude Headings, Matrix column & row labels. Seperator is
+    Creates a 3D array where the first dimension is represents the plate rows,
+    the second represents the plate columns, and the third contains the timeseries data.
+    This is meant to be used with txt files exported for Biotek's Gen5 software
+    with the following output parameters:
+        -Contents: Well data for each read.
+        -Format: Can inlcude Headings, Matrix column & row labels. Separator is
         Tab.
         -Can also include the procedure summary, which will be used to fill the
         meta data field.
@@ -27,8 +32,10 @@ def import_results(data_file:str, n_rows:int, n_cols:list or int, run_time:float
         -data(dict): Keys are the read titles and values are the 3D data arrays.
         -time(dict): Keys are the read titles and values are 1D arrays of the
         timepoints in hours.
-        -meta_data(dict): Keys are the metadata titles and values are lists of the
+        -meta_data(dict): Keys are the metadata titles and values are the
+        information.
     '''
+    
     file_read = open(data_file, encoding="iso-8859-1")
 
     data = {}

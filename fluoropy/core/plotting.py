@@ -433,18 +433,18 @@ def plot_replicate_time_series(frame,
         ax = axes_flat[subplot_idx]
         wells = subplot_data[(sample_id, conc)]
 
-        time = None
-        for well in wells:
-            if well.time_points is not None:
-                time = well.time_points
-                break
-
-        if time is None:
-            raise RuntimeError(f"No valid time points found for {sample_id} at concentration {conc}.")
-
         for well in wells:
             if measurement in well.time_series:
                 replicate_data = well.time_series[measurement]
+                if well.time_points is not None:
+                    time = well.time_points
+                    # Trim trailing zeros from pre-allocated import arrays
+                    nonzero = np.nonzero(time)[0]
+                    n = int(nonzero[-1]) + 1 if len(nonzero) else len(time)
+                    time = time[:n]
+                    replicate_data = replicate_data[:n]
+                else:
+                    time = np.arange(len(replicate_data))
                 label = getattr(well, 'plate_id', well.well_id)
                 ax.plot(time, replicate_data, '-', alpha=0.6,
                        linewidth=1.5, label=label, zorder=2)

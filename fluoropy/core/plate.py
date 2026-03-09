@@ -687,6 +687,9 @@ class Plate:
 
         wells_loaded = 0
 
+        # Pre-reshape time arrays once (avoid redundant reshape inside well loop)
+        reshaped_time = {k: v.reshape(-1) for k, v in time_dict.items()}
+
         # Set sample information
         for row in range(max_rows):
             for col in range(max_cols):
@@ -736,8 +739,7 @@ class Plate:
                             well_data = [data_array[row, col]]
 
                         # Get corresponding time points
-                        time_points = time_dict.get(measurement_type)
-                        time_points = time_points.reshape(-1) # Ensure it's a 1D array
+                        time_points = reshaped_time.get(measurement_type)
 
                         # Add time series to well
                         well.add_time_series(measurement_type, well_data, time_points)
