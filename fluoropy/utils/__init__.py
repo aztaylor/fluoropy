@@ -9,10 +9,14 @@ from .conversions import *
 from .validation import *
 from .helpers import *
 from .import_data import import_results
+from .time_utils import align_replicates_by_od
 
 __all__ = [
     # Import/export utilities
     "import_results",
+
+    # Time utilities
+    "align_replicates_by_od",
 
     # Conversion utilities
     "convert_units",
