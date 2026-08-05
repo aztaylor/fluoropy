@@ -29,7 +29,8 @@ class SampleFrame:
     """
 
     def __init__(self, plates: Union[Plate, List[Plate]],
-                 ignored_sample_types: Optional[List[str]] = None):
+                 ignored_sample_types: Optional[List[str]] = None,
+                 keep_controls_separate: bool = False):
         """
         Initialize SampleFrame from plate(s).
 
@@ -39,12 +40,18 @@ class SampleFrame:
             Single plate or list of plates to process
         ignored_sample_types : List[str], optional
             Sample types to ignore during initialization
+        keep_controls_separate : bool, default False
+            If True, control samples are kept per-plate and renamed with a
+            numeric suffix (e.g. "NC_1", "NC_2"). Each experimental sample
+            gains a ``matched_control`` attribute with the ID of the control
+            from the same plate.
         """
         # Ensure plates is a list
         if not isinstance(plates, list):
             plates = [plates]
         self.plates = plates
         self.ignored_sample_types = ignored_sample_types or []
+        self.keep_controls_separate = keep_controls_separate
 
         # Generate frame name
         if len(plates) == 1:
@@ -219,39 +226,118 @@ class SampleFrame:
         All samples (including controls and blanks) are merged across plates
         by their sample_type. Per-plate matching is handled at calculation time
         by filtering wells by plate_id.
+
+        When keep_controls_separate=True, control samples are kept per-plate
+        and given numeric suffixes (e.g. "NC_1", "NC_2"). Experimental samples
+        gain a matched_control attribute pointing to the control from their plate.
         """
-        # Dictionary to temporarily group wells by sample_type
+        if self.keep_controls_separate:
+            self._initialize_samples_separate_controls()
+        else:
+            self._initialize_samples_merged()
+
+    def _initialize_samples_merged(self):
+        """Standard initialization: merge all wells by sample_type across plates."""
         sample_groups = defaultdict(list)
 
-        # Collect all wells from all plates
         for plate_idx, plate in enumerate(self.plates):
             wells = self._get_wells_from_plate(plate)
-            plate_id = self.plate_ids[plate_idx]
-
-            # Group wells by sample type
             for well in wells:
                 if well.sample_type is not None and not well.is_excluded() and str(well.sample_type) not in self.ignored_sample_types:
-                    # Always merge by sample_type (including blanks and controls)
-                    group_key = well.sample_type
-                    sample_groups[group_key].append(well)
-                    
+                    sample_groups[well.sample_type].append(well)
 
-        # Create Sample objects for each sample type
         for sample_id, wells in sample_groups.items():
-            if wells:  # Only create if we have wells
-                # Sort wells by their plate position to maintain consistent ordering
-                # This ensures concentrations stay in the original plate order
+            if wells:
                 wells_sorted = sorted(wells, key=lambda w: (w.row, w.column))
-
-                # Use the original sample_type from the wells for the Sample object
-                # (the sample_id might have plate identifier appended for blanks)
                 original_sample_type = wells_sorted[0].sample_type
                 sample = Sample(original_sample_type, wells_sorted)
-
-                # Set plate_id from wells (will be set in Sample._initialize_from_wells())
-                # For multi-plate samples (controls), this will be from first well
-                # For single-plate samples (blanks, test samples), this will be correct
                 self.samples[sample_id] = sample
+
+    def _initialize_samples_separate_controls(self):
+        """
+        Initialization with replicate-aligned composite controls.
+
+        Experimental samples are grouped by the set of plates they appear on.
+        For each unique plate-set one composite control Sample is created per
+        control type, named "{type}_1", "{type}_2", etc.  Its wells contain
+        only the control wells from the plates in that set, ordered by plate,
+        so replicate index i matches replicate index i of every experimental
+        sample in the same plate-set.
+
+        Each experimental sample gains a matched_control string attribute
+        pointing to its control sample ID.  Control samples have matched_control
+        set to None.
+        """
+        plate_order = {pid: idx for idx, pid in enumerate(self.plate_ids)}
+
+        # --- Pass 1: collect wells ---
+        exp_groups: Dict[str, list] = defaultdict(list)   # sample_type -> wells
+        # ctrl_wells_by_plate: plate_id -> {ctrl_type -> [wells]}
+        ctrl_wells_by_plate: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
+
+        for plate in self.plates:
+            for well in self._get_wells_from_plate(plate):
+                if well.sample_type is None or well.is_excluded():
+                    continue
+                if str(well.sample_type) in self.ignored_sample_types:
+                    continue
+                if well.is_control:
+                    ctrl_wells_by_plate[well.plate_id][str(well.sample_type)].append(well)
+                else:
+                    exp_groups[well.sample_type].append(well)
+
+        # --- Pass 2: determine the plate-set for each experimental sample ---
+        # plate-set = frozenset of plate_ids the sample has wells on
+        sample_plate_set: Dict[str, frozenset] = {
+            st: frozenset(w.plate_id for w in wells)
+            for st, wells in exp_groups.items()
+        }
+
+        # --- Pass 3: build one composite NC per (plate-set, ctrl_type) ---
+        # Map (plate_set, ctrl_type) -> NC sample ID in frame
+        plate_set_ctrl_to_nc_id: Dict[Tuple, str] = {}
+        ctrl_type_counter: Dict[str, int] = defaultdict(int)
+
+        for plate_set in dict.fromkeys(sample_plate_set.values()):  # preserve first-seen order
+            # Collect ctrl_types present on any plate in this set
+            ctrl_types_in_set: set = set()
+            for pid in plate_set:
+                ctrl_types_in_set.update(ctrl_wells_by_plate[pid].keys())
+
+            for ctrl_type in sorted(ctrl_types_in_set):
+                key = (plate_set, ctrl_type)
+                if key in plate_set_ctrl_to_nc_id:
+                    continue
+                ctrl_type_counter[ctrl_type] += 1
+                new_id = f"{ctrl_type}_{ctrl_type_counter[ctrl_type]}"
+                plate_set_ctrl_to_nc_id[key] = new_id
+
+                # Gather NC wells from this plate-set in plate order
+                nc_wells: list = []
+                for pid in sorted(plate_set, key=lambda p: plate_order.get(p, 0)):
+                    nc_wells.extend(
+                        sorted(ctrl_wells_by_plate[pid].get(ctrl_type, []),
+                               key=lambda w: (w.row, w.column))
+                    )
+                self.samples[new_id] = Sample(ctrl_type, nc_wells)
+
+        # --- Pass 4: build experimental Samples ---
+        # Sort wells by (plate_order, row, col) so replicate axis aligns with NC.
+        # matched_control points to the NC for the first ctrl_type in this plate-set.
+        for sample_type, wells in exp_groups.items():
+            wells_sorted = sorted(
+                wells, key=lambda w: (plate_order.get(w.plate_id, 0), w.row, w.column)
+            )
+            sample = Sample(sample_type, wells_sorted)
+
+            ps = sample_plate_set[sample_type]
+            # Use the NC with the lowest counter for this plate-set (first ctrl type)
+            nc_ids = [
+                plate_set_ctrl_to_nc_id[(ps, ct)]
+                for ct in sorted({ct for (fps, ct) in plate_set_ctrl_to_nc_id if fps == ps})
+            ]
+            sample.matched_control = nc_ids[0] if nc_ids else None
+            self.samples[sample_type] = sample
 
     def _get_wells_from_plate(self, plate: Plate) -> List[Well]:
         """Get wells from a plate object."""

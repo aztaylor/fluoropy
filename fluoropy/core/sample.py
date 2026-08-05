@@ -115,6 +115,7 @@ class Sample:
         self.other_modifications: Optional[Dict[str, np.ndarray]] = None
         self.is_blank: bool = False
         self.is_control: bool = False
+        self.matched_control: Optional[str] = None  # ID of matched control Sample (when keep_controls_separate=True)
 
         # Initialize from wells if provided
         if wells:
@@ -218,8 +219,11 @@ class Sample:
         if not self.wells:
             return
 
-        # Set properties from first well
-        first_well = self.wells[0]
+        # Set properties from first non-excluded well
+        active_wells = [w for w in self.wells if not w.is_excluded()]
+        if not active_wells:
+            return
+        first_well = active_wells[0]
         self.medium = first_well.medium
         self.antibiotics = dict(first_well.antibiotics) if first_well.antibiotics else {}
         self.inducers = dict(first_well.inducers) if first_well.inducers else {}
@@ -234,6 +238,8 @@ class Sample:
         best_time = None
         best_count = -1
         for well in self.wells:
+            if well.is_excluded():
+                continue
             if well.time_points is not None:
                 nonzero = int(np.count_nonzero(well.time_points))
                 if nonzero > best_count:
