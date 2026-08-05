@@ -1,278 +1,150 @@
 """
-Normalization functions for fluorescence data.
+Control-relative and robust normalization.
 
-These functions provide various ways to normalize fluorescence data
-relative to controls or reference conditions.
+These complement the OD-relative normalization on SampleFrame
+(``calculate_normalized_timeseries``) and the plate-wide z-score on Plate
+(``calculate_zscore_normalization``); they express a well relative to a
+control set, or relative to a robust centre.
 """
 
+from typing import Dict, List, Optional
+
 import numpy as np
-import pandas as pd
-from typing import List, Dict, Optional, Union
-from ..core.plate import Plate
 
-def normalize_to_controls(plate: Plate, test_wells: List[str],
-                         positive_controls: List[str],
-                         negative_controls: List[str],
-                         timepoint: Optional[int] = None) -> Dict[str, float]:
+from ._extract import well_values
+
+# Scale factor making the MAD a consistent estimator of the standard
+# deviation for normally distributed data.
+_MAD_TO_SIGMA = 1.4826
+
+
+def normalize_to_controls(plate, measurement: str,
+                          test_wells: List[str],
+                          positive_controls: List[str],
+                          negative_controls: List[str],
+                          timepoint_idx: int = -1) -> Dict[str, float]:
     """
-    Normalize test wells to control wells using percent control formula.
+    Express each test well as a percentage of the control window.
 
-    Normalized = ((Test - Negative) / (Positive - Negative)) * 100
+    ``100 * (test - mean_neg) / (mean_pos - mean_neg)``
 
-    Args:
-        plate: Plate object containing the data
-        test_wells: Wells to normalize
-        positive_controls: Positive control wells (100% signal)
-        negative_controls: Negative control wells (0% signal)
-        timepoint: Specific timepoint for kinetic data
+    0% matches the negative controls, 100% the positive controls. Values
+    outside that range are not clipped -- a well above 100% genuinely exceeded
+    the positive control and that is worth seeing.
 
-    Returns:
-        Dict mapping well positions to normalized values
+    Returns
+    -------
+    dict
+        Well position to percent-of-control. Wells with no usable value are
+        absent from the result.
+
+    Raises
+    ------
+    ValueError
+        If either control set has no usable wells, or if the two control
+        means coincide (no window to normalize against).
     """
-    # Calculate control means
-    pos_values = []
-    for well_pos in positive_controls:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            pos_values.append(well.fluorescence)
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                pos_values.append(well.kinetic_data[timepoint])
+    pos, _ = well_values(plate, positive_controls, measurement, timepoint_idx)
+    neg, _ = well_values(plate, negative_controls, measurement, timepoint_idx)
 
-    neg_values = []
-    for well_pos in negative_controls:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            neg_values.append(well.fluorescence)
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                neg_values.append(well.kinetic_data[timepoint])
+    if len(pos) == 0 or len(neg) == 0:
+        raise ValueError(
+            f"Need usable wells in both control sets; got {len(pos)} positive "
+            f"and {len(neg)} negative"
+        )
 
-    pos_mean = np.mean(pos_values)
-    neg_mean = np.mean(neg_values)
+    window = pos.mean() - neg.mean()
+    if window == 0:
+        raise ValueError(
+            "Positive and negative control means are identical; there is no "
+            "window to normalize against"
+        )
 
-    # Normalize test wells
-    normalized = {}
-    for well_pos in test_wells:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            test_value = well.fluorescence
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                test_value = well.kinetic_data[timepoint]
-            else:
-                continue
-
-        if pos_mean != neg_mean:
-            norm_value = ((test_value - neg_mean) / (pos_mean - neg_mean)) * 100
-        else:
-            norm_value = 100  # If controls are equal, assume 100%
-
-        normalized[well_pos] = norm_value
-
-    return normalized
+    values, used_ids = well_values(plate, test_wells, measurement, timepoint_idx)
+    return {
+        well_id: float(100 * (value - neg.mean()) / window)
+        for well_id, value in zip(used_ids, values)
+    }
 
 
-def percent_inhibition(plate: Plate, test_wells: List[str],
-                      control_wells: List[str],
-                      timepoint: Optional[int] = None) -> Dict[str, float]:
+def percent_inhibition(plate, measurement: str,
+                       test_wells: List[str],
+                       control_wells: List[str],
+                       timepoint_idx: int = -1) -> Dict[str, float]:
     """
-    Calculate percent inhibition relative to control wells.
+    Percent reduction relative to uninhibited controls.
 
-    % Inhibition = ((Control - Test) / Control) * 100
+    ``100 * (mean_control - test) / mean_control``
 
-    Args:
-        plate: Plate object containing the data
-        test_wells: Wells with test compounds
-        control_wells: Control wells (no inhibition)
-        timepoint: Specific timepoint for kinetic data
+    0% means no inhibition, 100% means signal fully abolished. Negative values
+    indicate the well exceeded the control.
 
-    Returns:
-        Dict mapping well positions to percent inhibition values
+    Raises
+    ------
+    ValueError
+        If no usable control wells are found, or their mean is zero.
     """
-    # Calculate control mean
-    control_values = []
-    for well_pos in control_wells:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            control_values.append(well.fluorescence)
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                control_values.append(well.kinetic_data[timepoint])
+    control, _ = well_values(plate, control_wells, measurement, timepoint_idx)
 
-    control_mean = np.mean(control_values)
+    if len(control) == 0:
+        raise ValueError("No usable control wells found")
 
-    # Calculate inhibition for test wells
-    inhibition = {}
-    for well_pos in test_wells:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            test_value = well.fluorescence
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                test_value = well.kinetic_data[timepoint]
-            else:
-                continue
+    control_mean = control.mean()
+    if control_mean == 0:
+        raise ValueError(
+            "Control mean is zero; percent inhibition is undefined against a "
+            "zero baseline"
+        )
 
-        if control_mean != 0:
-            inhib_value = ((control_mean - test_value) / control_mean) * 100
-        else:
-            inhib_value = 0
-
-        inhibition[well_pos] = inhib_value
-
-    return inhibition
+    values, used_ids = well_values(plate, test_wells, measurement, timepoint_idx)
+    return {
+        well_id: float(100 * (control_mean - value) / control_mean)
+        for well_id, value in zip(used_ids, values)
+    }
 
 
-def fold_change(plate: Plate, test_wells: List[str],
-               reference_wells: List[str],
-               timepoint: Optional[int] = None) -> Dict[str, float]:
+def robust_z_score(plate, measurement: str,
+                   well_list: Optional[List[str]] = None,
+                   timepoint_idx: int = -1) -> Dict[str, float]:
     """
-    Calculate fold change relative to reference wells.
+    Median/MAD-based z-score.
 
-    Fold Change = Test / Reference
+    ``(value - median) / (1.4826 * MAD)``
 
-    Args:
-        plate: Plate object containing the data
-        test_wells: Wells to calculate fold change for
-        reference_wells: Reference wells (baseline)
-        timepoint: Specific timepoint for kinetic data
+    Unlike the mean/std z-score on ``Plate.calculate_zscore_normalization``,
+    the centre and spread here are not dragged by the very outliers you are
+    trying to find, which matters on a plate where a few wells are wildly off.
 
-    Returns:
-        Dict mapping well positions to fold change values
+    Parameters
+    ----------
+    well_list : list of str, optional
+        Wells to score. Defaults to every well with a sample assigned.
+
+    Returns
+    -------
+    dict
+        Well position to robust z-score. Returns all-zero scores when the MAD
+        is zero (more than half the wells share one value), since spread is
+        then undefined rather than infinite.
     """
-    # Calculate reference mean
-    ref_values = []
-    for well_pos in reference_wells:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            ref_values.append(well.fluorescence)
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                ref_values.append(well.kinetic_data[timepoint])
+    if well_list is None:
+        from ._extract import all_well_values
 
-    ref_mean = np.mean(ref_values)
-
-    # Calculate fold change for test wells
-    fold_changes = {}
-    for well_pos in test_wells:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            test_value = well.fluorescence
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                test_value = well.kinetic_data[timepoint]
-            else:
-                continue
-
-        if ref_mean != 0:
-            fc_value = test_value / ref_mean
-        else:
-            fc_value = float('inf') if test_value > 0 else 1
-
-        fold_changes[well_pos] = fc_value
-
-    return fold_changes
-
-
-def z_score_normalize(plate: Plate, well_list: List[str],
-                     timepoint: Optional[int] = None) -> Dict[str, float]:
-    """
-    Z-score normalize fluorescence values.
-
-    Z-score = (Value - Mean) / Standard Deviation
-
-    Args:
-        plate: Plate object containing the data
-        well_list: Wells to normalize
-        timepoint: Specific timepoint for kinetic data
-
-    Returns:
-        Dict mapping well positions to z-score normalized values
-    """
-    # Collect all values
-    values = []
-    valid_wells = []
-
-    for well_pos in well_list:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            value = well.fluorescence
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                value = well.kinetic_data[timepoint]
-            else:
-                continue
-
-        values.append(value)
-        valid_wells.append(well_pos)
+        values, used_ids = all_well_values(plate, measurement, timepoint_idx)
+    else:
+        values, used_ids = well_values(plate, well_list, measurement, timepoint_idx)
 
     if len(values) < 2:
-        return {well: 0.0 for well in valid_wells}
+        return {well_id: 0.0 for well_id in used_ids}
 
-    # Calculate population statistics
-    mean_val = np.mean(values)
-    std_val = np.std(values, ddof=0)  # Population std for z-score
+    median = np.median(values)
+    mad = np.median(np.abs(values - median))
 
-    # Calculate z-scores
-    z_scores = {}
-    for i, well_pos in enumerate(valid_wells):
-        if std_val != 0:
-            z_score = (values[i] - mean_val) / std_val
-        else:
-            z_score = 0.0
-        z_scores[well_pos] = z_score
+    if mad == 0:
+        return {well_id: 0.0 for well_id in used_ids}
 
-    return z_scores
-
-
-def robust_z_score_normalize(plate: Plate, well_list: List[str],
-                           timepoint: Optional[int] = None) -> Dict[str, float]:
-    """
-    Robust z-score normalization using median and MAD.
-
-    Robust Z-score = (Value - Median) / (1.4826 * MAD)
-    where MAD = Median Absolute Deviation
-
-    Args:
-        plate: Plate object containing the data
-        well_list: Wells to normalize
-        timepoint: Specific timepoint for kinetic data
-
-    Returns:
-        Dict mapping well positions to robust z-score normalized values
-    """
-    # Collect all values
-    values = []
-    valid_wells = []
-
-    for well_pos in well_list:
-        well = plate.get_well(well_pos)
-        if timepoint is None:
-            value = well.fluorescence
-        else:
-            if well.kinetic_data and len(well.kinetic_data) > timepoint:
-                value = well.kinetic_data[timepoint]
-            else:
-                continue
-
-        values.append(value)
-        valid_wells.append(well_pos)
-
-    if len(values) < 2:
-        return {well: 0.0 for well in valid_wells}
-
-    # Calculate robust statistics
-    median_val = np.median(values)
-    mad = np.median(np.abs(np.array(values) - median_val))
-
-    # Calculate robust z-scores
-    robust_z_scores = {}
-    for i, well_pos in enumerate(valid_wells):
-        if mad != 0:
-            robust_z = (values[i] - median_val) / (1.4826 * mad)
-        else:
-            robust_z = 0.0
-        robust_z_scores[well_pos] = robust_z
-
-    return robust_z_scores
+    scale = _MAD_TO_SIGMA * mad
+    return {
+        well_id: float((value - median) / scale)
+        for well_id, value in zip(used_ids, values)
+    }

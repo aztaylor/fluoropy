@@ -8,9 +8,8 @@ __author__ = "Aleczander Taylor"
 __email__ = "aztaylor76@fastmail.com"
 
 # Import main modules/classes here for easy access
-from .core import Plate, Well, Sample, SampleFrame, Fluorophore, Assay, plotting
+from .core import Plate, Well, Sample, SampleFrame, Fluorophore, plotting
 from .core.fluorophore import fluorophore_db
-from .core.assay import EndpointAssay
 
 # Import utility modules (users can access as fluoropy.utils.*)
 from . import utils
@@ -26,8 +25,6 @@ __all__ = [
     "SampleFrame",
     "Fluorophore",
     "fluorophore_db",
-    "Assay",
-    "EndpointAssay",
     "utils",
     "analysis",
 ]
