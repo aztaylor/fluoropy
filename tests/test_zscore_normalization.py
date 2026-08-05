@@ -4,16 +4,12 @@ Test script to verify z-score normalization functionality in Plate class.
 """
 
 import numpy as np
-import sys
-import os
 
-# Add the fluoropy module to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fluoropy.core.plate import Plate
 from fluoropy.core.well import Well
 
-def test_zscore_normalization():
+def test_zscore_normalization(tmp_path):
     """Test the z-score normalization functionality."""
 
     # Create a 96-well plate
@@ -131,9 +127,10 @@ def test_zscore_normalization():
         if fig:
             print("✅ SUCCESS: Z-score heatmap created successfully!")
             # Save the plot
-            fig.savefig('/Users/alec/Documents/SideProjects/fluoropy/zscore_heatmap_test.png',
-                       dpi=150, bbox_inches='tight')
-            print("   Heatmap saved as 'zscore_heatmap_test.png'")
+            out = tmp_path / "zscore_heatmap_test.png"
+            fig.savefig(out, dpi=150, bbox_inches='tight')
+            assert out.is_file()
+            print(f"   Heatmap saved as {out}")
         else:
             print("⚠️  Plotting skipped (matplotlib not available)")
     except Exception as e:

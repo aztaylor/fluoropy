@@ -1,8 +1,6 @@
 """
 Test layout calculation for large number of samples
 """
-import sys
-sys.path.insert(0, '/Users/alec/Documents/SideProjects/fluoropy')
 
 import numpy as np
 from fluoropy.core.plate import Plate
@@ -94,7 +92,6 @@ def test_layout_calculation():
     print("\n" + "="*70)
     print("✓ All layout tests PASSED!")
     print("="*70)
-    return True
 
 
 if __name__ == "__main__":

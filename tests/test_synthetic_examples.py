@@ -1,10 +1,29 @@
 """
 Test examples showing synthetic vs natural data approaches.
+
+PARKED -- these tests target the retired scalar-fluorescence data model:
+``Well(position=, fluorescence=, well_type=)``, ``Plate.get_fluorescence_data()``
+and ``EndpointAssay.analyze()``. Well now stores ``time_series`` dicts instead,
+so none of this API exists.
+
+This file is the closest thing to a written specification of what the old
+fluorescence API was supposed to do, which makes it worth keeping until the
+open question is settled: whether to port fluoropy/analysis/ and
+fluoropy/core/assay.py onto the time_series model, or delete them. Those two
+modules are broken in exactly the same way and share the same fate.
+
+Port -> rewrite these tests against time_series and unskip.
+Delete -> delete this file along with them.
 """
 
 import pytest
 import numpy as np
 import fluoropy
+
+pytestmark = pytest.mark.skip(
+    reason="targets the retired scalar-fluorescence API; tied to the "
+    "port-or-delete decision on fluoropy/analysis/ and core/assay.py"
+)
 
 class TestPlateWithSyntheticData:
     """Tests using synthetic data - RECOMMENDED approach."""

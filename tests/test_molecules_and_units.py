@@ -13,15 +13,11 @@ Tests:
 """
 
 import sys
-import os
 import numpy as np
 import pandas as pd
 import tempfile
 import pytest
 
-# Add fluoropy to path
-fluoropy_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, fluoropy_root)
 
 from fluoropy.core.plate import Plate
 from fluoropy.core.well import Well

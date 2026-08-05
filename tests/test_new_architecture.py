@@ -10,12 +10,8 @@ Tests the separation of concerns:
 """
 
 import numpy as np
-import sys
-import os
 import traceback
 
-# Add the fluoropy directory to the path
-sys.path.insert(0, '/Users/alec/Documents/SideProjects/fluoropy')
 
 def test_new_architecture():
     """Test the new simplified architecture."""
@@ -113,12 +109,12 @@ def test_new_architecture():
     print(f"   SampleFrame created with {len(frame.samples)} samples")
     print(f"   Available sample IDs: {list(frame.samples.keys())}")
 
-    # Calculate statistics for all samples in the frame
-    frame.calculate_all_statistics()
+    # Statistics are calculated automatically when each Sample is built,
+    # so there is no longer a separate calculate_all_statistics() step.
 
     # Test indexing by sample_type (not sample_type + concentration)
     retrieved_sample = frame["sample_1"]
-    print(f"   Retrieved sample_1: {retrieved_sample.sample_type}")
+    print(f"   Retrieved sample_1: {retrieved_sample.name}")
     print(f"   Concentrations: {retrieved_sample.concentrations}")
     print(f"   OD600 array shape: {retrieved_sample.time_series['OD600'].shape}")
     print(f"   Final OD600 values: {retrieved_sample.time_series['OD600'][-1, :]}")  # All concentrations at final timepoint
@@ -136,15 +132,25 @@ def test_new_architecture():
     blank_sample.calculate_statistics()
     frame.samples["Blank"] = blank_sample
 
-    # Process the data (blank subtraction, normalization, etc.)
-    frame.process_all_data(blank_sample_id="Blank", normalization_offset=0.01)
+    # Process the data. The single process_all_data() entry point was replaced
+    # by explicit pipeline steps, and the results now live in their own
+    # attributes rather than as extra keys inside time_series.
+    frame.calculate_blank_subtracted_timeseries(["OD600", "GFP"])
+    frame.calculate_normalized_timeseries(od_measurement="OD600", alpha=0.01)
 
     print(f"   Processing completed!")
-    print(f"   Sample 1 has blanked_data: {'blanked_data' in frame['sample_1'].time_series}")
-    print(f"   Sample 1 has normalized_data: {'normalized_data' in frame['sample_1'].time_series}")
 
-    if 'blanked_data' in frame['sample_1'].time_series:
-        print(f"   Sample 1 blanked data shape: {frame['sample_1'].time_series['blanked_data'].shape}")
+    sample_1 = frame["sample_1"]
+    assert sample_1.blanked_data, "blank subtraction produced no data"
+    assert sample_1.normalized_data, "normalization produced no data"
+
+    # Processed arrays keep the raw replicate shape:
+    # (n_timepoints, n_replicates, n_concentrations)
+    assert sample_1.blanked_data["OD600"].shape == sample_1.time_series["OD600"].shape
+    assert (
+        sample_1.normalized_data["GFP"].shape == sample_1.time_series["GFP"].shape
+    )
+    print(f"   Sample 1 blanked data shape: {sample_1.blanked_data['OD600'].shape}")
 
     print("\n🎉 All tests passed! New architecture is working correctly.")
     print("\n📋 Architecture Summary:")
@@ -155,7 +161,6 @@ def test_new_architecture():
     print("     - error[measurement] = numpy array (n_timepoints, n_concentrations) ✅")
     print("   • SampleFrame: Indexable sample collection with processing pipeline ✅")
 
-    return True
 
 if __name__ == "__main__":
     test_new_architecture()

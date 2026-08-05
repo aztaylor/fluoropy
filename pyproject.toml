@@ -51,7 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=6.0",
+    "pytest>=7.0",  # 7.0 introduced the pythonpath ini option used below
     "pytest-cov",
     "black",
     "isort",
@@ -77,6 +77,15 @@ Homepage = "https://github.com/aztaylor/fluoropy"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["fluoropy*"]
+
+[tool.pytest.ini_options]
+# Put the repo root on sys.path so tests import the package as `fluoropy.*`
+# without needing sys.path manipulation in each test module.
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "integration: requires a local Gen5 data file not tracked in git",
+]
 
 [tool.black]
 line-length = 88

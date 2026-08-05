@@ -8,10 +8,7 @@ rather than the old keep_controls_separate parameter at initialization time.
 
 import numpy as np
 import sys
-import os
 
-# Add the fluoropy module to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fluoropy.core.plate import Plate
 from fluoropy.core.sampleframe import SampleFrame

@@ -2,11 +2,9 @@
 Tests for SampleFrame keep_controls_separate option.
 """
 
-import sys
 import numpy as np
 import pytest
 
-sys.path.insert(0, '/Users/alec/Documents/SideProjects/fluoropy')
 
 from fluoropy.core.well import Well
 from fluoropy.core.sampleframe import SampleFrame

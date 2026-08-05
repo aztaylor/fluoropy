@@ -3,8 +3,6 @@ Simple test script for plotting replicate time series curves in SampleFrame.
 Uses a minimal example without requiring interactive matplotlib display.
 """
 
-import sys
-sys.path.insert(0, '/Users/alec/Documents/SideProjects/fluoropy')
 
 import numpy as np
 import matplotlib
@@ -61,7 +59,7 @@ def create_small_synthetic_plate() -> Plate:
     return plate
 
 
-def test_basic_functionality():
+def test_basic_functionality(tmp_path):
     """Test basic plotting functionality."""
     print("="*60)
     print("TEST: Basic Replicate Time Series Plotting")
@@ -113,8 +111,10 @@ def test_basic_functionality():
             print(f"     - {key}")
 
         # Save figure for verification
-        fig.savefig('/Users/alec/Documents/SideProjects/fluoropy/test_plot_output.png', dpi=100)
-        print("   ✓ Figure saved to test_plot_output.png")
+        out = tmp_path / "test_plot_output.png"
+        fig.savefig(out, dpi=100)
+        assert out.is_file()
+        print(f"   ✓ Figure saved to {out}")
 
         plt.close(fig)
 
@@ -122,9 +122,7 @@ def test_basic_functionality():
         print(f"   ✗ Error: {e}")
         import traceback
         traceback.print_exc()
-        return False
 
-    return True
 
 
 def test_error_handling():
@@ -141,7 +139,6 @@ def test_error_handling():
     try:
         frame.plot_replicate_time_series('InvalidMeas', sample_ids=['s14'])
         print("   ✗ Should have raised ValueError")
-        return False
     except ValueError as e:
         print(f"   ✓ Correctly caught: {str(e)[:50]}...")
 
@@ -150,7 +147,6 @@ def test_error_handling():
     try:
         frame.plot_replicate_time_series('OD600', sample_ids=['nonexistent'])
         print("   ✗ Should have raised ValueError")
-        return False
     except ValueError as e:
         print(f"   ✓ Correctly caught: {str(e)[:50]}...")
 
@@ -159,12 +155,10 @@ def test_error_handling():
     try:
         frame.plot_replicate_time_series('OD600', sample_ids=[])
         print("   ✗ Should have raised ValueError")
-        return False
     except ValueError as e:
         print(f"   ✓ Correctly caught: {str(e)[:50]}...")
 
     print("\n   ✓ All error handling tests passed")
-    return True
 
 
 def main():

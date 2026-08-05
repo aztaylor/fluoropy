@@ -28,7 +28,7 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
         Plate object with synthetic time series data
     """
     # Create plate
-    plate = Plate(8, 12, name=plate_name)
+    plate = Plate(plate_format="96", name=plate_name)
 
     # Define experimental parameters
     n_timepoints = 25
@@ -49,7 +49,7 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
             for rep in range(n_replicates):
                 row = row_start + conc_idx
                 col = col_start + rep
-                well = plate.get_well(row, col)
+                well = plate.get_well_by_position(row, col)
 
                 # Set sample information
                 well.set_sample_info(
@@ -92,7 +92,7 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
                 well_counter += 1
 
     # Add blank wells
-    blank_well = plate.get_well(7, 0)
+    blank_well = plate.get_well_by_position(7, 0)
     blank_well.set_sample_info(
         sample_type="blank",
         medium="LB",
@@ -102,7 +102,7 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
     blank_well.time_series["OD600"] = np.ones(n_timepoints) * 0.02 + np.random.normal(0, 0.01, n_timepoints)
     blank_well.time_series["GFP"] = np.ones(n_timepoints) * 50 + np.random.normal(0, 10, n_timepoints)
 
-    blank_well2 = plate.get_well(7, 1)
+    blank_well2 = plate.get_well_by_position(7, 1)
     blank_well2.set_sample_info(
         sample_type="blank",
         medium="LB",
@@ -187,7 +187,6 @@ def test_single_plate_plotting():
 
     plt.show()
     print("✓ Single plate test completed")
-    return frame
 
 
 def test_multi_plate_plotting():
@@ -235,7 +234,6 @@ def test_multi_plate_plotting():
 
     plt.show()
     print("✓ Multi-plate test completed")
-    return frame
 
 
 def test_error_handling():

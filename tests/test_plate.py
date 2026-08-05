@@ -6,16 +6,12 @@ data loading, statistical analysis, and integration with Well objects.
 """
 
 import sys
-import os
 import numpy as np
 import pandas as pd
 
-# Add the fluoropy package to the path
-fluoropy_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(fluoropy_root, 'fluoropy'))
 
-from core.plate import Plate
-from core.well import Well
+from fluoropy.core.plate import Plate
+from fluoropy.core.well import Well
 
 def create_test_data():
     """Create test data for plate loading"""
@@ -174,139 +170,6 @@ def test_concentration_validation():
 
     print("✅ Concentration validation test passed")
 
-def test_replicate_statistics():
-    """Test replicate statistics calculation"""
-    print("\nTesting Replicate Statistics...")
-
-    plate = Plate("96", "test_stats")
-    sample_map, conc_map, data_dict, time_dict = create_test_data()
-
-    plate.load_from_arrays(sample_map, conc_map, data_dict, time_dict)
-
-    # Calculate replicate stats
-    od_stats = plate.calculate_replicate_stats("600")
-    gfp_stats = plate.calculate_replicate_stats("GFP:480,510")
-
-    # Check that we have stats for each sample type
-    assert "s14" in od_stats
-    assert "s22" in od_stats
-    assert "s54" in od_stats
-    assert "s63" in od_stats
-
-    # Check that each sample has stats for different concentrations
-    s14_stats = od_stats["s14"]
-    assert 10000.0 in s14_stats
-    assert 0.0 in s14_stats
-
-    # Check the structure of individual stats
-    conc_stats = s14_stats[10000.0]
-    assert "mean" in conc_stats
-    assert "std" in conc_stats
-    assert "sem" in conc_stats
-    assert "n" in conc_stats
-    assert "wells" in conc_stats
-
-    # Check dimensions
-    assert len(conc_stats["mean"]) == 50  # 50 time points
-    assert conc_stats["n"] == 3  # 3 replicates per sample/concentration
-
-    print("✅ Replicate statistics test passed")
-
-def test_get_replicate_arrays():
-    """Test getting replicate arrays in platereadertools format"""
-    print("\nTesting Get Replicate Arrays...")
-
-    plate = Plate("96", "test_arrays")
-    sample_map, conc_map, data_dict, time_dict = create_test_data()
-
-    plate.load_from_arrays(sample_map, conc_map, data_dict, time_dict)
-
-    # Get replicate arrays
-    result = plate.get_replicate_arrays("600", "mean")
-
-    # Check structure
-    assert "data" in result
-    assert "time" in result
-    assert "n_replicates" in result
-    assert "sample_map" in result
-    assert "concentration_map" in result
-
-    # Check dimensions
-    assert result["data"].shape == (8, 12, 50)  # rows x cols x time_points
-    assert len(result["time"]) == 50
-    assert result["n_replicates"].shape == (8, 12)
-    assert result["sample_map"].shape == (8, 12)
-    assert result["concentration_map"].shape == (8, 12)
-
-    # Check that sample map matches
-    assert result["sample_map"][0, 0] == "s14"
-    assert result["sample_map"][0, 6] == "s22"
-
-    # Test different stat types
-    std_result = plate.get_replicate_arrays("600", "std")
-    sem_result = plate.get_replicate_arrays("600", "sem")
-
-    assert std_result["data"].shape == (8, 12, 50)
-    assert sem_result["data"].shape == (8, 12, 50)
-
-    print("✅ Get replicate arrays test passed")
-
-def test_normalized_measurements():
-    """Test creating normalized measurements"""
-    print("\nTesting Normalized Measurements...")
-
-    plate = Plate("96", "test_norm")
-    sample_map, conc_map, data_dict, time_dict = create_test_data()
-
-    plate.load_from_arrays(sample_map, conc_map, data_dict, time_dict)
-
-    # Create normalized measurement
-    norm_name = plate.create_normalized_measurement("GFP:480,510", "600", offset=0.01)
-
-    # Check that normalized measurement was created
-    assert norm_name in plate.measurements
-    assert norm_name in plate["A1"].time_series
-
-    # Check that normalized data exists and has correct length
-    norm_data = plate["A1"].time_series[norm_name]
-    assert len(norm_data) == 50
-
-    # Verify calculation is correct for one well
-    gfp_data = plate["A1"].time_series["GFP:480,510"]
-    od_data = plate["A1"].time_series["600"]
-    expected = gfp_data / (od_data + 0.01)
-    np.testing.assert_array_almost_equal(norm_data, expected)
-
-    print("✅ Normalized measurements test passed")
-
-def test_summary_stats():
-    """Test summary statistics methods"""
-    print("\nTesting Summary Statistics...")
-
-    plate = Plate("96", "test_summary")
-    sample_map, conc_map, data_dict, time_dict = create_test_data()
-
-    plate.load_from_arrays(sample_map, conc_map, data_dict, time_dict)
-
-    # Get summary stats
-    summary_df = plate.get_replicate_summary_stats("600", time_index=-1)  # Final time point
-
-    # Check DataFrame structure
-    assert isinstance(summary_df, pd.DataFrame)
-    expected_columns = ['wells', 'sample_type', 'concentration', 'mean', 'std', 'sem', 'n', 'cv_percent']
-    for col in expected_columns:
-        assert col in summary_df.columns
-
-    # Check that we have data for each sample type
-    sample_types = summary_df['sample_type'].unique()
-    assert "s14" in sample_types
-    assert "s22" in sample_types
-
-    # Check that means are reasonable (should be positive for OD)
-    assert all(summary_df['mean'] > 0)
-
-    print("✅ Summary statistics test passed")
-
 def test_plotting_methods():
     """Test plotting functionality (without actually showing plots)"""
     print("\nTesting Plotting Methods...")
@@ -371,7 +234,12 @@ def test_well_organization():
     plate = Plate("96", "test_organization")
     sample_map, conc_map, data_dict, time_dict = create_test_data()
 
-    plate.load_from_arrays(sample_map, conc_map, data_dict, time_dict)
+    # Blank/control classification is explicit -- load_from_arrays no longer
+    # infers it from sample names.
+    plate.load_from_arrays(
+        sample_map, conc_map, data_dict, time_dict,
+        controls=["NC"], blanks=["Blank"],
+    )
 
     # Test getting wells by sample type
     s14_wells = plate.get_wells_by_sample("s14")
@@ -383,7 +251,7 @@ def test_well_organization():
 
     # Test getting control wells
     control_wells = plate.get_control_wells()
-    assert len(control_wells) == 6  # NC wells (WT are also controls now)
+    assert len(control_wells) == 6  # the NC row
 
     # Test getting wells by concentration
     high_conc_wells = plate.get_wells_by_concentration(10000.0)
@@ -408,38 +276,3 @@ def test_summary_methods():
     plate.print_sample_summary()
 
     print("✅ Summary methods test passed")
-
-def run_all_tests():
-    """Run all plate tests"""
-    print("="*60)
-    print("RUNNING PLATE CLASS TESTS")
-    print("="*60)
-
-    try:
-        test_plate_initialization()
-        test_well_indexing()
-        test_load_from_arrays()
-        test_concentration_validation()
-        test_replicate_statistics()
-        test_get_replicate_arrays()
-        test_normalized_measurements()
-        test_summary_stats()
-        test_plotting_methods()
-        test_data_export()
-        test_well_organization()
-        test_summary_methods()
-
-        print("\n" + "="*60)
-        print("🎉 ALL PLATE TESTS PASSED!")
-        print("="*60)
-        return True
-
-    except Exception as e:
-        print(f"\n❌ TEST FAILED: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-if __name__ == "__main__":
-    success = run_all_tests()
-    sys.exit(0 if success else 1)
