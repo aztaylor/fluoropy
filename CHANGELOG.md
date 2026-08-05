@@ -52,6 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Concentration axis mislabelling in `Sample`.** `time_series_mean[:, i]` could
+  carry a different concentration's data than `concentrations[i]` claimed,
+  silently — the arithmetic succeeded and produced plausible numbers. Two
+  causes, both now fixed by making `calculate_statistics()` own the axis and
+  rebuild the raw arrays against it:
+  - Excluding a well shrank `concentrations` without rebuilding the data, so
+    every value shifted one column. Only excluding the *lowest* concentration
+    was safe, since that label sorted last.
+  - `_populate_time_series()` hardcoded descending-concentration columns, so
+    `concentration_order='position'` or `'original'` mislabelled everything
+    even with no exclusions.
+
+  `_calculate_measurement_statistics()` now raises `RuntimeError` if the data
+  columns and labels ever disagree, rather than silently misattributing.
 - `check_edge_effects` computed `ord(well.row)` on an int row index, raising
   `TypeError` on any plate with data.
 - `Sample._initialize_from_wells` took its medium, antibiotics, inducers and
@@ -60,13 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-Both are covered by strict `xfail` tests, so they will fail loudly when fixed:
+Covered by a strict `xfail` test, so it will fail loudly when fixed:
 
 - `Well.set_sample_info(concentration=)` accepts and documents the argument
   but never assigns it; the value is silently discarded. Assign
   `well.concentration` directly, or use `moi=`.
-- `Sample.calculate_statistics()` recomputes `concentrations` from the
-  non-excluded wells without re-running `_populate_time_series()`. After
-  excluding a well the data array keeps its original concentration axis while
-  the labels shrink, so values shift by one column. Excluding the lowest
-  concentration is safe; excluding any other silently mislabels the data.

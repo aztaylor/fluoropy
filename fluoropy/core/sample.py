@@ -120,8 +120,8 @@ class Sample:
         # Initialize from wells if provided
         if wells:
             self._initialize_from_wells()
-            self._populate_time_series()
-            # Automatically calculate basic statistics
+            # calculate_statistics() populates time_series itself, against the
+            # concentration axis it computes, so no separate call is needed.
             self.calculate_statistics()
 
     def __repr__(self) -> str:
@@ -250,7 +250,8 @@ class Sample:
             last = np.max(np.nonzero(best_time)) + 1 if np.any(best_time != 0) else len(best_time)
             self.time = best_time[:last].copy()
 
-    def _populate_time_series(self, measurement_types: Optional[List[str]] = None):
+    def _populate_time_series(self, measurement_types: Optional[List[str]] = None,
+                              concentrations: Optional[np.ndarray] = None):
         """
         Populate time_series with raw individual replicate data organized by concentration.
 
@@ -261,6 +262,15 @@ class Sample:
         ----------
         measurement_types : List[str], optional
             Measurement types to extract. If None, extracts all available measurements.
+        concentrations : np.ndarray, optional
+            Exact concentration axis to build columns against, in order. Column
+            ``i`` of every resulting array is ``concentrations[i]``; a
+            concentration with no wells becomes an all-NaN column, and wells
+            whose concentration is absent from the list are dropped.
+
+            Callers that own a concentration ordering must pass it, so the data
+            axis and the labels come from one source. When None, the columns
+            are sorted by descending concentration.
         """
         if not self.wells:
             return
@@ -304,20 +314,31 @@ class Sample:
             if n_timepoints == 0:
                 continue
 
-            # Sort concentrations descending to match calculate_statistics() 'value' order
-            sorted_concentrations = sorted(concentration_groups.keys(), reverse=True)
-            n_concentrations = len(sorted_concentrations)
+            if concentrations is None:
+                # No axis imposed by the caller: descending concentration.
+                axis = sorted(concentration_groups.keys(), reverse=True)
+            else:
+                axis = [float(c) for c in concentrations]
 
-            # Find max replicates per concentration to handle uneven data
-            max_replicates = max(len(data_list) for data_list in concentration_groups.values())
+            n_concentrations = len(axis)
+            if n_concentrations == 0:
+                continue
+
+            # Size the replicate axis from the concentrations actually on the
+            # axis, so a dropped group cannot inflate it.
+            max_replicates = max(
+                (len(concentration_groups.get(c, ())) for c in axis), default=0
+            )
+            if max_replicates == 0:
+                continue
 
             # Build 3D array: (n_timepoints, n_replicates, n_concentrations)
             time_series_array = np.full((n_timepoints, max_replicates, n_concentrations), np.nan)
 
-            # Populate array
-            for conc_idx, concentration in enumerate(sorted_concentrations):
-                data_list = concentration_groups[concentration]
-                for rep_idx, data in enumerate(data_list):
+            # Populate array. A concentration with no wells keeps its NaN
+            # column, holding the position so column i stays axis[i].
+            for conc_idx, concentration in enumerate(axis):
+                for rep_idx, data in enumerate(concentration_groups.get(concentration, ())):
                     actual_len = min(len(data), n_timepoints)
                     time_series_array[:actual_len, rep_idx, conc_idx] = data[:actual_len]
 
@@ -528,8 +549,10 @@ class Sample:
             - 'position': Order by plate position (original behavior)
             - 'original': Order by original plate design positions
         """
+        available_measurements = self._get_measurement_types()
+
         if measurement_types is None:
-            measurement_types = self._get_measurement_types()
+            measurement_types = available_measurements
 
         if not measurement_types:
             return
@@ -537,11 +560,21 @@ class Sample:
         # Get concentrations using the specified ordering for time series organization
         # This determines both the concentration array AND time series column order
         self.concentrations = self.get_concentrations_custom_order(order=concentration_order)
-        n_concentrations = len(self.concentrations)
 
         # Store the canonical concentration order used for time series data
         # This ensures get_concentrations() always returns the same order as time series columns
         self._timeseries_concentration_order = self.concentrations.copy()
+
+        # Rebuild the raw arrays against that exact axis. Without this the data
+        # keeps whatever axis it was first built with, so excluding a well (which
+        # shrinks self.concentrations) or asking for a non-default ordering
+        # silently shifts every value into the wrong column.
+        #
+        # Every measurement is rebuilt, not just the requested ones: the
+        # concentration axis is shared across measurements, so repopulating a
+        # subset would leave the rest on the old axis.
+        self._populate_time_series(available_measurements,
+                                   concentrations=self.concentrations)
 
         # Clear existing derived data to ensure clean recalculation
         self.time_series_mean.clear()
@@ -569,6 +602,17 @@ class Sample:
         raw_data = self.time_series[measurement_type]
         n_timepoints, n_replicates, n_concentrations = raw_data.shape
         concentrations = self.concentrations
+
+        # Column i of raw_data must be concentrations[i]. If the two ever drift
+        # apart, every value below is attributed to the wrong concentration --
+        # silently, because the arithmetic still succeeds. Fail instead.
+        if n_concentrations != len(concentrations):
+            raise RuntimeError(
+                f"Concentration axis mismatch for '{measurement_type}': data has "
+                f"{n_concentrations} columns but {len(concentrations)} labels "
+                f"({list(concentrations)}). The raw arrays were not rebuilt "
+                f"against the current concentration axis."
+            )
 
         # Initialize arrays for statistics
         mean_array = np.full((n_timepoints, n_concentrations), np.nan)
