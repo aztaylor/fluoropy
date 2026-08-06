@@ -11,6 +11,9 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 
+from .well import row_label
+from .well import well_id as make_well_id
+
 if TYPE_CHECKING:
     import matplotlib.pyplot as plt
     import matplotlib.figure
@@ -100,7 +103,7 @@ def plot_timeseries_grid(plate, measurement_type: str, figsize: tuple = (15, 10)
     for row in range(8):
         for col in range(12):
             ax = axes[row, col]
-            well_id = f"{chr(ord('A') + row)}{col + 1}"
+            well_id = make_well_id(row, col)
             well = plate.wells.get(well_id)
 
             if well and hasattr(well, 'time_series') and measurement_type in well.time_series:
@@ -196,7 +199,7 @@ def plot_zscore_heatmap(plate, measurement_type: str, timepoint_idx: int,
     ax.set_xticks(range(plate.cols))
     ax.set_xticklabels([str(i+1) for i in range(plate.cols)])
     ax.set_yticks(range(plate.rows))
-    ax.set_yticklabels([chr(ord('A') + i) for i in range(plate.rows)])
+    ax.set_yticklabels([row_label(i) for i in range(plate.rows)])
 
     if title is None:
         title = f'Z-score Heatmap: {measurement_type} (Timepoint {timepoint_idx})'

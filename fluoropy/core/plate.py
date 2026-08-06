@@ -8,7 +8,8 @@ with statistical analysis delegated to Sample and SampleFrame classes.
 from typing import Dict, List, Optional, Any, Union
 import numpy as np
 import pandas as pd
-from .well import Well
+from .well import Well, parse_well_id
+from .well import well_id as make_well_id
 from ..utils.import_data import import_results
 
 
@@ -155,7 +156,7 @@ class Plate:
         """Initialize all wells for the plate format."""
         for row in range(self.rows):
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 self.wells[well_id] = Well(well_id, row, col)
                 self.wells[well_id].plate_id = self.plate_id  # Assign plate_id to each well
 
@@ -323,7 +324,7 @@ class Plate:
         # Now populate wells with molecule concentrations and units
         for row in range(self.rows):
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 well = self.wells[well_id]
 
                 # Set molecule of interest (if primary_mol_used was determined)
@@ -391,7 +392,7 @@ class Plate:
             if isinstance(col, str):
                 col = int(col) - 1
             if 0 <= row < self.rows and 0 <= col < self.cols:
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 return self.wells[well_id]
         return None
 
@@ -428,7 +429,7 @@ class Plate:
     def get_well_by_position(self, row: int, column: int) -> Optional[Well]:
         """Get well by row (0-based) and column (0-based) indices"""
         if 0 <= row < self.rows and 0 <= column < self.cols:
-            well_id = f"{chr(ord('A') + row)}{column + 1}"
+            well_id = make_well_id(row, column)
             return self.wells[well_id]
         return None
 
@@ -475,7 +476,7 @@ class Plate:
         wells_list = []
         for row in range(self.rows):
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 wells_list.append(self.wells[well_id])
         return wells_list
 
@@ -491,7 +492,7 @@ class Plate:
         for row in range(self.rows):
             row_wells = []
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 row_wells.append(self.wells[well_id])
             rows.append(row_wells)
         return rows
@@ -508,7 +509,7 @@ class Plate:
         for col in range(self.cols):
             col_wells = []
             for row in range(self.rows):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 col_wells.append(self.wells[well_id])
             columns.append(col_wells)
         return columns
@@ -528,7 +529,7 @@ class Plate:
         """
         if 1 <= row_number <= self.rows:
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row_number - 1)}{col + 1}"
+                well_id = make_well_id(row_number - 1, col)
                 yield self.wells[well_id]
 
     def iter_wells_by_column(self, column_number: int):
@@ -546,7 +547,7 @@ class Plate:
         """
         if 1 <= column_number <= self.cols:
             for row in range(self.rows):
-                well_id = f"{chr(ord('A') + row)}{column_number}"
+                well_id = make_well_id(row, column_number - 1)
                 yield self.wells[well_id]
 
     # ======================================================================
@@ -584,8 +585,7 @@ class Plate:
                 col_idx = well.column_index
             else:
                 # Parse from well_id
-                row_idx = ord(well.well_id[0]) - ord('A')
-                col_idx = int(well.well_id[1:]) - 1
+                row_idx, col_idx = parse_well_id(well.well_id)
 
             if value_type == "fluorescence" and hasattr(well, 'fluorescence') and well.fluorescence is not None:
                 # Handle both single values and time series
@@ -693,7 +693,7 @@ class Plate:
         # Set sample information
         for row in range(max_rows):
             for col in range(max_cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 well = self.wells[well_id]
 
                 # Extract sample type (handle both numpy arrays and lists)
@@ -935,7 +935,7 @@ class Plate:
 
         for row_idx in range(min(n_rows, self.rows)):
             for col_idx in range(min(n_cols, self.cols)):
-                well_id = f"{chr(ord('A') + row_idx)}{col_idx + 1}"
+                well_id = make_well_id(row_idx, col_idx)
                 well = self.wells.get(well_id)
                 if well is None:
                     continue
@@ -1407,8 +1407,7 @@ class Plate:
             well = self.wells.get(well_id)
             if well:
                 # Parse row and column from well_id
-                row_idx = ord(well_id[0]) - ord('A')
-                col_idx = int(well_id[1:]) - 1
+                row_idx, col_idx = parse_well_id(well_id)
 
                 if 0 <= row_idx < self.rows and 0 <= col_idx < self.cols:
                     z_matrix[row_idx, col_idx] = z_score
