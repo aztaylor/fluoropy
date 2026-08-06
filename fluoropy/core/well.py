@@ -4,6 +4,85 @@ Plate and Well classes for managing fluorescence assay data.
 
 from typing import Dict, List, Optional, Tuple, Union, Any
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# Well roles
+# ---------------------------------------------------------------------------
+# A well's role is stored once, as a string, and the is_* booleans are derived
+# from it. Storing the booleans independently would allow states like
+# "negative control that is not a control", and would require callers to keep
+# several fields in sync by hand.
+#
+# NOTE ON POLARITY: "negative control" means the *no-effect* reference and
+# "positive control" the *maximal-effect* reference. Neither says anything
+# about signal direction. For a repressing construct the negative control (a
+# non-targeting guide, say) carries the HIGHEST signal. Nothing in this package
+# assumes an ordering between them.
+
+ROLE_SAMPLE = "sample"
+ROLE_BLANK = "blank"
+ROLE_CONTROL = "control"  # a control whose polarity is unspecified
+ROLE_NEGATIVE_CONTROL = "negative_control"
+ROLE_POSITIVE_CONTROL = "positive_control"
+
+VALID_ROLES = frozenset({
+    ROLE_SAMPLE,
+    ROLE_BLANK,
+    ROLE_CONTROL,
+    ROLE_NEGATIVE_CONTROL,
+    ROLE_POSITIVE_CONTROL,
+})
+
+#: Accepted spellings that canonicalize to a role in VALID_ROLES.
+ROLE_ALIASES = {
+    "nc": ROLE_NEGATIVE_CONTROL,
+    "neg": ROLE_NEGATIVE_CONTROL,
+    "neg_control": ROLE_NEGATIVE_CONTROL,
+    "no_effect": ROLE_NEGATIVE_CONTROL,
+    "pc": ROLE_POSITIVE_CONTROL,
+    "pos": ROLE_POSITIVE_CONTROL,
+    "pos_control": ROLE_POSITIVE_CONTROL,
+    "max_effect": ROLE_POSITIVE_CONTROL,
+    "ctrl": ROLE_CONTROL,
+    "test": ROLE_SAMPLE,
+    "unknown": ROLE_SAMPLE,
+}
+
+#: Roles that count as controls for get_control_wells() and is_control.
+CONTROL_ROLES = frozenset({
+    ROLE_CONTROL,
+    ROLE_NEGATIVE_CONTROL,
+    ROLE_POSITIVE_CONTROL,
+})
+
+
+def canonical_role(role: Optional[str]) -> str:
+    """
+    Normalize a role string, accepting the aliases in ROLE_ALIASES.
+
+    Raises
+    ------
+    ValueError
+        If the role is not recognised. Roles are a closed set on purpose: a
+        typo silently creating a new role would quietly drop wells out of
+        every control lookup.
+    """
+    if role is None:
+        return ROLE_SAMPLE
+
+    key = str(role).strip().lower().replace("-", "_").replace(" ", "_")
+
+    if key in VALID_ROLES:
+        return key
+    if key in ROLE_ALIASES:
+        return ROLE_ALIASES[key]
+
+    raise ValueError(
+        f"Unknown well role {role!r}. Valid roles: {sorted(VALID_ROLES)}; "
+        f"accepted aliases: {sorted(ROLE_ALIASES)}"
+    )
+
+
 class Well:
     """
     Represents a single well in a microplate - a simple data container.
@@ -43,8 +122,9 @@ class Well:
         # Alternative access for backward compatibility
         self.position = well_id
 
-        # Sample information
-        self.sample_type: Optional[str] = None
+        # Sample information. sample_name identifies which sample this well
+        # holds; `sample_type` remains available as an alias.
+        self.sample_name: Optional[str] = None
         self.concentration: Optional[float] = None
         self.medium: Optional[str] = None
 
@@ -64,9 +144,9 @@ class Well:
         # Molecule of interest (which molecule's concentration is "the" concentration)
         self.moi: Optional[str] = None
 
-        # Well classification
-        self.is_blank: bool = False
-        self.is_control: bool = False
+        # Well classification. Stored once as a role; the is_* booleans below
+        # are derived, so they cannot disagree with each other.
+        self._role: str = ROLE_SAMPLE
 
         # Exclusion system
         self.exclude: bool = False
@@ -84,7 +164,120 @@ class Well:
     def __repr__(self) -> str:
         """String representation of the well."""
         excluded_str = " [EXCLUDED]" if self.exclude else ""
-        return f"Well({self.well_id}, sample={self.sample_type}, conc={self.concentration}){excluded_str}"
+        role_str = "" if self.role == ROLE_SAMPLE else f", role={self.role}"
+        return (f"Well({self.well_id}, sample={self.sample_name}, "
+                f"conc={self.concentration}{role_str}){excluded_str}")
+
+    # ======================================================================
+    # IDENTITY
+    # ======================================================================
+
+    @property
+    def sample_type(self) -> Optional[str]:
+        """Alias of :attr:`sample_name`, kept for existing code and notebooks."""
+        return self.sample_name
+
+    @sample_type.setter
+    def sample_type(self, value: Optional[str]) -> None:
+        self.sample_name = value
+
+    # ======================================================================
+    # ROLE
+    # ======================================================================
+    # One stored field, several derived views. Assigning any of the booleans
+    # writes through to the role, so existing code that sets well.is_blank
+    # keeps working and the fields cannot drift apart.
+
+    @property
+    def role(self) -> str:
+        """
+        What this well is for: sample, blank, control, negative_control or
+        positive_control.
+
+        "negative" and "positive" describe the *effect* (none vs maximal), not
+        the signal direction -- a repressing construct's negative control
+        carries the highest signal.
+
+        Accepts the aliases in :data:`ROLE_ALIASES` on assignment (``'nc'``,
+        ``'no_effect'``, ``'max_effect'``, ...) and stores the canonical form.
+        """
+        return getattr(self, "_role", ROLE_SAMPLE)
+
+    @role.setter
+    def role(self, value: Optional[str]) -> None:
+        self._role = canonical_role(value)
+
+    def _set_role_flag(self, flag: bool, role_when_true: str,
+                       roles_cleared: frozenset) -> None:
+        """
+        Write-through helper for the boolean views.
+
+        Setting a flag True adopts its role. Setting it False only resets to
+        `sample` when the current role is one the flag actually covers, so
+        `well.is_blank = False` never silently clears an unrelated role.
+        """
+        if flag:
+            self._role = role_when_true
+        elif self.role in roles_cleared:
+            self._role = ROLE_SAMPLE
+
+    @property
+    def is_blank(self) -> bool:
+        return self.role == ROLE_BLANK
+
+    @is_blank.setter
+    def is_blank(self, value: bool) -> None:
+        self._set_role_flag(bool(value), ROLE_BLANK, frozenset({ROLE_BLANK}))
+
+    @property
+    def is_control(self) -> bool:
+        """True for any control, whatever its polarity."""
+        return self.role in CONTROL_ROLES
+
+    @is_control.setter
+    def is_control(self, value: bool) -> None:
+        # Assigning True keeps an already-known polarity rather than
+        # flattening negative_control back to a bare control.
+        if value and self.role in CONTROL_ROLES:
+            return
+        self._set_role_flag(bool(value), ROLE_CONTROL, CONTROL_ROLES)
+
+    @property
+    def is_negative_control(self) -> bool:
+        """The no-effect reference. Says nothing about signal direction."""
+        return self.role == ROLE_NEGATIVE_CONTROL
+
+    @is_negative_control.setter
+    def is_negative_control(self, value: bool) -> None:
+        self._set_role_flag(bool(value), ROLE_NEGATIVE_CONTROL,
+                            frozenset({ROLE_NEGATIVE_CONTROL}))
+
+    @property
+    def is_positive_control(self) -> bool:
+        """The maximal-effect reference. Says nothing about signal direction."""
+        return self.role == ROLE_POSITIVE_CONTROL
+
+    @is_positive_control.setter
+    def is_positive_control(self, value: bool) -> None:
+        self._set_role_flag(bool(value), ROLE_POSITIVE_CONTROL,
+                            frozenset({ROLE_POSITIVE_CONTROL}))
+
+    # Short aliases, matching how plates get talked about at the bench.
+    @property
+    def is_nc(self) -> bool:
+        return self.is_negative_control
+
+    @is_nc.setter
+    def is_nc(self, value: bool) -> None:
+        self.is_negative_control = value
+
+    @property
+    def is_pc(self) -> bool:
+        return self.is_positive_control
+
+    @is_pc.setter
+    def is_pc(self, value: bool) -> None:
+        self.is_positive_control = value
 
     # ======================================================================
     # BASIC INFORMATION METHODS
@@ -102,7 +295,8 @@ class Well:
                         inducers_units: Optional[Dict[str, str]] = None,
                         other_modifications_units: Optional[Dict[str, str]] = None,
                         is_blank: bool = False,
-                        is_control: bool = False):
+                        is_control: bool = False,
+                        role: Optional[str] = None):
 
         """
         Set sample information for the well.
@@ -110,9 +304,15 @@ class Well:
         Parameters
         ----------
         sample_type : str
-            Type/name of the sample
+            Name of the sample this well holds (alias of ``sample_name``)
         concentration : float, optional
-            Concentration of the sample
+            Concentration of the sample. Mutually exclusive with ``moi``.
+        role : str, optional
+            Well role: ``'sample'``, ``'blank'``, ``'control'``,
+            ``'negative_control'`` or ``'positive_control'``, or any alias in
+            ``ROLE_ALIASES`` (``'nc'``, ``'no_effect'``, ``'max_effect'``, ...).
+            Takes precedence over ``is_blank`` / ``is_control``, which remain
+            for existing callers.
         medium : str, optional
             Growth medium used
         antibiotics : Dict[str, float], optional
@@ -136,12 +336,18 @@ class Well:
         is_control : bool, default False
             Whether this well is a control
         """
-        self.sample_type = sample_type
+        self.sample_name = sample_type
         self.medium = medium
         self.moi = moi
         self.strain_modifications = strain_modifications
-        self.is_blank = is_blank
-        self.is_control = is_control
+
+        if role is not None:
+            self.role = role
+        else:
+            # Legacy flags. is_blank first so an explicit is_control still
+            # lands, and so passing both does not depend on argument order.
+            self.is_blank = is_blank
+            self.is_control = is_control
 
         # Set molecule concentrations
         if antibiotics is not None:
@@ -175,21 +381,41 @@ class Well:
                 raise ValueError(f"Other modifications units should be a dict. Got: {type(other_modifications_units)}")
             self.other_modifications_units.update(other_modifications_units)
 
-        self._set_concentration()
+        self._set_concentration(concentration)
 
-    def _set_concentration(self):
-        """Set the concentration for this well first based on the provided
-        'concentration' parameter, then based on 'moi' if provided, and finally
-        based on the the first inducer, antibiotic, or other modificationif present. This method ensures that only one source of concentration information is used to avoid ambiguity.
-
-        Raises:
-            ValueError: _description_
-            ValueError: _description_
+    def _set_concentration(self, concentration: Optional[float] = None):
         """
-        if self.concentration is not None and self.moi is not None:
-            raise ValueError("Cannot provide both 'concentration' and 'moi' parameters. Please provide only one to avoid ambiguity.")
-        elif self.concentration is not None:
-            self.concentration = self.concentration
+        Resolve this well's concentration from exactly one source.
+
+        Priority: an explicit ``concentration`` argument, then ``moi`` (look up
+        that molecule's value), then a lone inducer/antibiotic/modification.
+        Only one source is used, so the value is never ambiguous.
+
+        Parameters
+        ----------
+        concentration : float, optional
+            Explicit concentration. Mutually exclusive with ``self.moi``.
+
+        Raises
+        ------
+        ValueError
+            If both an explicit concentration and an ``moi`` are given, or if
+            ``moi`` names a molecule this well does not have.
+        """
+        if concentration is not None and self.moi is not None:
+            raise ValueError(
+                "Cannot provide both 'concentration' and 'moi' parameters. "
+                "Please provide only one to avoid ambiguity."
+            )
+
+        if concentration is not None:
+            # Previously this branch existed but assigned self.concentration to
+            # itself, so a concentration passed to set_sample_info() was
+            # silently discarded.
+            self.concentration = float(concentration)
+        elif self.concentration is not None and self.moi is None:
+            # Already set directly on the attribute; leave it alone.
+            pass
         elif self.moi is not None:
             if self.moi in self.inducers.keys():
                 self.concentration = self.inducers[self.moi]

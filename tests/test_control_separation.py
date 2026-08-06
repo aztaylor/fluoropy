@@ -173,6 +173,13 @@ def test_pooled_control_matching():
     plate1["A1"].add_time_series("OD600", [0.5, 0.6])
     plate1["A1"].medium = "LB"
 
+    # Fold change is expressed relative to each sample's own zero-concentration
+    # wells, so every sample needs one.
+    plate1["A2"].set_sample_info(sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False)
+    plate1["A2"].add_time_series("GFP", [80.0, 85.0])
+    plate1["A2"].add_time_series("OD600", [0.5, 0.6])
+    plate1["A2"].medium = "LB"
+
     plate1["B1"].set_sample_info(sample_type="NC", concentration=0.0, is_blank=False, is_control=True)
     plate1["B1"].add_time_series("GFP", [50.0, 55.0])
     plate1["B1"].add_time_series("OD600", [0.5, 0.6])
@@ -188,6 +195,11 @@ def test_pooled_control_matching():
     plate2["A1"].add_time_series("GFP", [150.0, 160.0])
     plate2["A1"].add_time_series("OD600", [0.5, 0.6])
     plate2["A1"].medium = "LB"
+
+    plate2["A2"].set_sample_info(sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False)
+    plate2["A2"].add_time_series("GFP", [120.0, 130.0])
+    plate2["A2"].add_time_series("OD600", [0.5, 0.6])
+    plate2["A2"].medium = "LB"
 
     plate2["C1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
     plate2["C1"].add_time_series("GFP", [5.0, 5.0])

@@ -319,7 +319,10 @@ class SampleFrame:
                         sorted(ctrl_wells_by_plate[pid].get(ctrl_type, []),
                                key=lambda w: (w.row, w.column))
                     )
-                self.samples[new_id] = Sample(ctrl_type, nc_wells)
+                # Name it by its frame key, not its control type, so
+                # frame[k].name == k holds. The control type is still
+                # recoverable from the sample's role and its wells.
+                self.samples[new_id] = Sample(new_id, nc_wells)
 
         # --- Pass 4: build experimental Samples ---
         # Sort wells by (plate_order, row, col) so replicate axis aligns with NC.
@@ -1045,10 +1048,24 @@ class SampleFrame:
         has_blank_data = blank_measurement is not None and blank_od is not None
 
         if has_blank_data:
-            # If blank has multiple concentrations, use the first (usually zero)
-            if len(blank_measurement.shape) == 2:
-                blank_measurement = blank_measurement[:, blank_conc_0_idx]
-                blank_od = blank_od[:, blank_conc_0_idx]
+            # Reduce the blank to one value per timepoint so it broadcasts
+            # against a well's 1-D series.
+            #
+            # `time_series` arrays are 3-D (timepoints, replicates,
+            # concentrations); only the 2-D case was handled here, so a 3-D
+            # blank fell through unreduced and `well - blank` broadcast to
+            # (T, R, T) instead of subtracting. That produced silently wrong
+            # numbers whenever the result was used, and a pandas "Must pass
+            # 2-d input" error when it reached a DataFrame.
+            def _blank_baseline(arr):
+                if arr.ndim == 3:
+                    return np.nanmean(arr[:, :, blank_conc_0_idx], axis=1)
+                if arr.ndim == 2:
+                    return arr[:, blank_conc_0_idx]
+                return arr
+
+            blank_measurement = _blank_baseline(blank_measurement)
+            blank_od = _blank_baseline(blank_od)
 
         for well in wells:
             # Get raw well data

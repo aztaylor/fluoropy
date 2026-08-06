@@ -4,7 +4,16 @@ Sample class for managing replicate statistics from wells.
 
 from typing import Dict, List, Optional, Any, Union
 import numpy as np
-from .well import Well
+from .well import (
+    CONTROL_ROLES,
+    ROLE_BLANK,
+    ROLE_CONTROL,
+    ROLE_NEGATIVE_CONTROL,
+    ROLE_POSITIVE_CONTROL,
+    ROLE_SAMPLE,
+    Well,
+    canonical_role,
+)
 
 
 class Sample:
@@ -113,8 +122,9 @@ class Sample:
         self.antibiotics: Optional[Dict[str, np.ndarray]] = None
         self.inducers: Optional[Dict[str, np.ndarray]] = None  # e.g., {'IPTG': np.array([1.0, 2.0, 3.0])}
         self.other_modifications: Optional[Dict[str, np.ndarray]] = None
-        self.is_blank: bool = False
-        self.is_control: bool = False
+        # Role is stored once; is_blank / is_control / is_nc / is_pc derive
+        # from it, matching Well.
+        self._role: str = ROLE_SAMPLE
         self.matched_control: Optional[str] = None  # ID of matched control Sample (when keep_controls_separate=True)
 
         # Initialize from wells if provided
@@ -131,6 +141,108 @@ class Sample:
         time_info = f", {len(self.time)}tp" if self.time is not None else ""
         conc_info = f", {len(self.concentrations)}conc" if self.concentrations is not None else ""
         return f"Sample({self.name}, {n_wells}wells, {n_measurements}meas{time_info}{conc_info})"
+
+    # ======================================================================
+    # IDENTITY
+    # ======================================================================
+    # `name` is the identifier, and it always equals the key this sample is
+    # stored under in its SampleFrame. The aliases exist because wells call the
+    # same concept sample_name / sample_type.
+
+    @property
+    def sample_name(self) -> str:
+        """Alias of :attr:`name`."""
+        return self.name
+
+    @sample_name.setter
+    def sample_name(self, value: str) -> None:
+        self.name = value
+
+    @property
+    def sample_type(self) -> str:
+        """Alias of :attr:`name`, matching ``Well.sample_type``."""
+        return self.name
+
+    @sample_type.setter
+    def sample_type(self, value: str) -> None:
+        self.name = value
+
+    # ======================================================================
+    # ROLE
+    # ======================================================================
+
+    @property
+    def role(self) -> str:
+        """
+        This sample's role, taken from its wells. See :attr:`Well.role`.
+
+        "negative" and "positive" describe the *effect* (none vs maximal), not
+        the signal direction.
+        """
+        return getattr(self, "_role", ROLE_SAMPLE)
+
+    @role.setter
+    def role(self, value: Optional[str]) -> None:
+        self._role = canonical_role(value)
+
+    def _set_role_flag(self, flag: bool, role_when_true: str,
+                       roles_cleared: frozenset) -> None:
+        if flag:
+            self._role = role_when_true
+        elif self.role in roles_cleared:
+            self._role = ROLE_SAMPLE
+
+    @property
+    def is_blank(self) -> bool:
+        return self.role == ROLE_BLANK
+
+    @is_blank.setter
+    def is_blank(self, value: bool) -> None:
+        self._set_role_flag(bool(value), ROLE_BLANK, frozenset({ROLE_BLANK}))
+
+    @property
+    def is_control(self) -> bool:
+        return self.role in CONTROL_ROLES
+
+    @is_control.setter
+    def is_control(self, value: bool) -> None:
+        if value and self.role in CONTROL_ROLES:
+            return
+        self._set_role_flag(bool(value), ROLE_CONTROL, CONTROL_ROLES)
+
+    @property
+    def is_negative_control(self) -> bool:
+        return self.role == ROLE_NEGATIVE_CONTROL
+
+    @is_negative_control.setter
+    def is_negative_control(self, value: bool) -> None:
+        self._set_role_flag(bool(value), ROLE_NEGATIVE_CONTROL,
+                            frozenset({ROLE_NEGATIVE_CONTROL}))
+
+    @property
+    def is_positive_control(self) -> bool:
+        return self.role == ROLE_POSITIVE_CONTROL
+
+    @is_positive_control.setter
+    def is_positive_control(self, value: bool) -> None:
+        self._set_role_flag(bool(value), ROLE_POSITIVE_CONTROL,
+                            frozenset({ROLE_POSITIVE_CONTROL}))
+
+    @property
+    def is_nc(self) -> bool:
+        return self.is_negative_control
+
+    @is_nc.setter
+    def is_nc(self, value: bool) -> None:
+        self.is_negative_control = value
+
+    @property
+    def is_pc(self) -> bool:
+        return self.is_positive_control
+
+    @is_pc.setter
+    def is_pc(self, value: bool) -> None:
+        self.is_positive_control = value
 
     @property
     def condition_key(self) -> tuple:
@@ -228,8 +340,7 @@ class Sample:
         self.antibiotics = dict(first_well.antibiotics) if first_well.antibiotics else {}
         self.inducers = dict(first_well.inducers) if first_well.inducers else {}
         self.other_modifications = dict(first_well.other_modifications) if first_well.other_modifications else {}
-        self.is_blank = first_well.is_blank
-        self.is_control = first_well.is_control
+        self.role = first_well.role
         self.plate_id = first_well.plate_id
         self.moi = first_well.moi
 
@@ -752,9 +863,28 @@ class Sample:
                 sample_data = self.time_series[measurement_type]
                 blank_data = blank_sample.time_series[measurement_type]
 
-                # If blank has only one concentration, broadcast it
                 if blank_data.shape[2] == 1:
-                    blank_data = np.broadcast_to(blank_data, sample_data.shape)
+                    # A single-condition blank is a background estimate, so
+                    # collapse its replicates to a per-timepoint mean and
+                    # broadcast that across every sample replicate and
+                    # concentration.
+                    #
+                    # Broadcasting the raw array instead would require the
+                    # blank to have exactly as many replicates as the sample,
+                    # which is not something a plate layout guarantees -- six
+                    # blank wells against two replicates per concentration is
+                    # an ordinary layout, and it used to raise. It would also
+                    # imply a pairing between blank replicate i and sample
+                    # replicate i that does not exist.
+                    blank_mean = np.nanmean(blank_data[:, :, 0], axis=1)
+                    blank_data = blank_mean[:, np.newaxis, np.newaxis]
+                elif blank_data.shape[1:] != sample_data.shape[1:]:
+                    raise ValueError(
+                        f"Cannot subtract blank for '{measurement_type}': blank has "
+                        f"shape {blank_data.shape} and sample has {sample_data.shape}. "
+                        f"A multi-concentration blank must match the sample's "
+                        f"replicate and concentration axes."
+                    )
 
                 self.blanked_data[measurement_type] = sample_data - blank_data
 
