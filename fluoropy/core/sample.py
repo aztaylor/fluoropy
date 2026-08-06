@@ -1,5 +1,32 @@
 """
 Sample class for managing replicate statistics from wells.
+
+Array axis conventions
+----------------------
+Every per-replicate array in this package is **timepoint-major**::
+
+    (n_timepoints, n_replicates, n_concentrations)
+
+and reducing across replicates drops the middle axis, never reorders the rest::
+
+    (n_timepoints, n_concentrations)
+
+That holds for ``time_series``, ``blanked_data`` and ``normalized_data``, and
+for their ``_mean`` / ``_error`` counterparts. All are dicts keyed by
+measurement name, so ``sample.blanked_data_mean['GFP'][t, c]`` is the mean over
+replicates at timepoint ``t``, concentration ``c``.
+
+``concentrations[i]`` labels column ``i`` of that last axis. The two are kept
+in step by :meth:`Sample.calculate_statistics`, which rebuilds the arrays
+whenever the axis changes; :meth:`_calculate_measurement_statistics` raises if
+they ever disagree.
+
+The one exception is ``fold_change``, a DataFrame indexed by
+``(concentration, replicate)`` with timepoints as columns -- effectively the
+transpose of the above -- and ``fold_change_mean`` / ``fold_change_error``,
+which are keyed by concentration rather than measurement and hold plain
+``(n_timepoints,)`` arrays. Convert with ``df.T`` if you need it
+timepoint-major.
 """
 
 from typing import Dict, List, Optional, Any, Union
