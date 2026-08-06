@@ -147,46 +147,45 @@ def test_fold_change_workflow():
     frame.calculate_fold_change(measurement='GFP', od_measurement='OD600', alpha=0.01)
     print("   ✓ Done")
 
-    # Check fold change results
-    print("\n7. Fold change results:")
-    for sample_id, sample in frame.samples.items():
-        if hasattr(sample, 'fold_change') and not sample.fold_change.empty:
-            print(f"\n   {sample_id}:")
-            print(f"   Shape: {sample.fold_change.shape}")
-            print(f"   Index (concentration, replicate):\n{sample.fold_change.index.tolist()}")
-            print(f"   First few timepoints:\n{sample.fold_change.iloc[:, :5]}")
+    # Fold change follows the package layout: a dict keyed by measurement
+    # holding (timepoints, replicates, concentrations), like time_series.
+    sample = frame['sample1']
+    assert 'GFP' in sample.fold_change
+
+    fold_change = sample.fold_change['GFP']
+    assert fold_change.ndim == 3
+
+    n_timepoints, _, n_concentrations = fold_change.shape
+    assert n_timepoints == len(sample.time)
+
+    # Zero is the within-sample reference, so it is not itself a fold change.
+    concentrations = sample.fold_change_concentrations
+    assert len(concentrations) == n_concentrations
+    assert 0.0 not in concentrations
+    # Descending, matching Sample.concentrations.
+    assert list(concentrations) == sorted(concentrations, reverse=True)
 
     # Step 4: Calculate statistics
     print("\n8. Calculating fold change statistics (mean and std across replicates)...")
     frame.calculate_fold_change_statistics(data_attribute='fold_change', error_type='std')
     print("   ✓ Done")
 
-    # Display statistics
-    print("\n9. Fold change statistics:")
-    for sample_id, sample in frame.samples.items():
-        if hasattr(sample, 'fold_change_mean'):
-            print(f"\n   {sample_id} - Mean fold changes:")
-            for conc, mean_values in sample.fold_change_mean.items():
-                print(f"     Conc {conc}: mean = {mean_values[:5]} ... (showing first 5 timepoints)")
+    # Reducing drops the replicate axis, as everywhere else.
+    mean = sample.fold_change_mean['GFP']
+    error = sample.fold_change_error['GFP']
+    assert mean.shape == (n_timepoints, n_concentrations)
+    assert error.shape == mean.shape
+    assert np.allclose(mean, np.nanmean(fold_change, axis=1), equal_nan=True)
 
-        if hasattr(sample, 'fold_change_error'):
-            print(f"\n   {sample_id} - Fold change error (std):")
-            for conc, error_values in sample.fold_change_error.items():
-                print(f"     Conc {conc}: std = {error_values[:5]} ... (showing first 5 timepoints)")
+    # The dose-response slice lines values up with their labels.
+    concs_at_t, values, errors = sample.fold_change_at_timepoint('GFP', -1)
+    assert len(concs_at_t) == len(values) == len(errors) == n_concentrations
+    assert np.allclose(values, mean[-1], equal_nan=True)
 
-    # Demonstrate accessing the data
-    print("\n10. Data access examples:")
-    for sample_id, sample in frame.samples.items():
-        if sample_id == 'sample1' and hasattr(sample, 'fold_change_mean'):
-            print(f"\n    {sample_id}:")
-            for conc in sorted(sample.fold_change_mean.keys()):
-                mean = sample.fold_change_mean[conc]
-                error = sample.fold_change_error[conc]
-                print(f"      Concentration {conc}:")
-                print(f"        - Mean fold change at t=0h: {mean[0]:.3f}")
-                print(f"        - Mean fold change at t=24h: {mean[-1]:.3f}")
-                print(f"        - Error at t=0h: {error[0]:.3f}")
-                print(f"        - Error at t=24h: {error[-1]:.3f}")
+    # The tabular view is still available for export.
+    table = sample.fold_change_dataframe('GFP')
+    assert list(table.index.names) == ['concentration', 'replicate']
+    assert table.shape[1] == n_timepoints
 
     print("\n" + "=" * 70)
     print("✓ All tests completed successfully!")

@@ -326,7 +326,6 @@ class SampleFrame:
 
         # --- Pass 4: build experimental Samples ---
         # Sort wells by (plate_order, row, col) so replicate axis aligns with NC.
-        # matched_control points to the NC for the first ctrl_type in this plate-set.
         for sample_type, wells in exp_groups.items():
             wells_sorted = sorted(
                 wells, key=lambda w: (plate_order.get(w.plate_id, 0), w.row, w.column)
@@ -334,12 +333,26 @@ class SampleFrame:
             sample = Sample(sample_type, wells_sorted)
 
             ps = sample_plate_set[sample_type]
-            # Use the NC with the lowest counter for this plate-set (first ctrl type)
-            nc_ids = [
-                plate_set_ctrl_to_nc_id[(ps, ct)]
-                for ct in sorted({ct for (fps, ct) in plate_set_ctrl_to_nc_id if fps == ps})
+            candidates = sorted(
+                ct for (fps, ct) in plate_set_ctrl_to_nc_id if fps == ps
+            )
+
+            # Prefer a control actually marked as the negative control.
+            #
+            # This used to take the alphabetically first control type, so a
+            # plate carrying both "WT" and "mRC1.1" matched against "WT" --
+            # uppercase sorts before lowercase -- rather than against the
+            # negative control. Roles make the intent expressible instead of
+            # depending on how the control happens to be spelled.
+            negative = [
+                ct for ct in candidates
+                if self.samples[plate_set_ctrl_to_nc_id[(ps, ct)]].is_negative_control
             ]
-            sample.matched_control = nc_ids[0] if nc_ids else None
+            preferred = negative or candidates
+
+            sample.matched_control = (
+                plate_set_ctrl_to_nc_id[(ps, preferred[0])] if preferred else None
+            )
             self.samples[sample_type] = sample
 
     def _get_wells_from_plate(self, plate: Plate) -> List[Well]:
@@ -635,9 +648,12 @@ class SampleFrame:
            - Calculate ratio of normalized sample to normalized zero-concentration control
            - Result: fold change at each timepoint
 
-        Stores result in sample.fold_change attribute as a pandas DataFrame.
-        Columns: timepoint indices
-        Rows: (concentration, replicate) indices
+        Stores the result in ``sample.fold_change[measurement]`` as an array of
+        shape ``(n_timepoints, n_replicates, n_concentrations)``, matching
+        ``time_series`` / ``blanked_data`` / ``normalized_data``. Its
+        concentration axis is labelled by ``sample.fold_change_concentrations``,
+        which excludes zero -- the within-sample reference is not itself a fold
+        change. Use ``Sample.fold_change_dataframe()`` for a tabular view.
 
         Parameters
         ----------
@@ -686,16 +702,18 @@ class SampleFrame:
                     print(f"Warning: No negative control found for {sample_id} on plate {sample.plate_id}")
                     continue
 
-            # Build fold change dataframe by processing individual replicates
-            fold_change_data = self._calculate_individual_fold_changes(
+            fold_change, concentrations = self._calculate_individual_fold_changes(
                 sample, control, measurement, od_measurement, alpha, pool_controls
             )
 
-            sample.fold_change = fold_change_data
+            # Keyed by measurement, like every other data dict on Sample.
+            sample.fold_change[measurement] = fold_change
+            sample.fold_change_concentrations = concentrations
 
     def _calculate_individual_fold_changes(self, sample: 'Sample', control: 'Sample',
                                           measurement: str, od_measurement: str,
-                                          alpha: float, pool_controls: bool = False) -> 'pd.DataFrame':
+                                          alpha: float, pool_controls: bool = False
+                                          ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate fold change for individual replicates with proper normalization.
 
@@ -705,9 +723,15 @@ class SampleFrame:
         3. Calculate within-sample fold change: normalized_sample_C / normalized_sample_0
         4. Normalize by control: within_sample_FC / normalized_control_0
 
-        Returns DataFrame with rows as (concentration, replicate_index) and columns as timepoints.
+        Returns
+        -------
+        (fold_change, concentrations)
+            ``fold_change`` has shape
+            ``(n_timepoints, n_replicates, n_concentrations)``, matching
+            ``time_series`` / ``blanked_data`` / ``normalized_data``.
+            ``concentrations`` labels the last axis, descending, and excludes
+            zero -- the within-sample reference is not itself a fold change.
         """
-        import pandas as pd
 
         # Find the blank samples for both sample and control using get_matching_key
         # Note: Blank keys always exclude plate_id since blanks are merged across plates
@@ -786,14 +810,16 @@ class SampleFrame:
         )  # Shape: (n_replicates, n_timepoints)
         control_zero_mean = np.mean(control_zero_normalized, axis=0)  # Shape: (n_timepoints,)
 
-        # Build fold change data
-        fold_change_rows = []
-        row_indices = []
+        # Build fold change per concentration. Zero concentration is the
+        # within-sample reference, so it is not itself a fold change.
+        #
+        # Concentrations run descending to match Sample.concentrations, which
+        # is the ordering every other array in the package uses.
+        fold_change_by_conc: Dict[float, List[np.ndarray]] = {}
 
-        # Only process non-zero concentrations
-        for conc in sorted(sample_wells_by_conc.keys()):
+        for conc in sorted(sample_wells_by_conc.keys(), reverse=True):
             if conc == 0.0:
-                continue  # Skip zero concentration for fold change calculation
+                continue
 
             wells = sample_wells_by_conc[conc]
             sample_conc_normalized = self._get_normalized_replicate_values(
@@ -804,37 +830,38 @@ class SampleFrame:
             control_wells = control_wells_by_conc.get(conc, [])
 
             if control_wells:
-                # If control has this concentration, use it
+                # Control has this concentration:
+                # (Sample_C / Sample_0) / (Control_C / Control_0)
                 control_conc_normalized = self._get_normalized_replicate_values(
                     control_wells, control_blank, measurement, od_measurement, alpha
-                )  # Shape: (n_replicates, n_timepoints)
-                control_conc_mean = np.mean(control_conc_normalized, axis=0)  # Shape: (n_timepoints,)
-
-                # Fold change: (Sample_C / Sample_0) / (Control_C / Control_0)
-                for rep_idx, normalized_rep in enumerate(sample_conc_normalized):
-                    within_sample_fc = normalized_rep / sample_zero_mean  # Sample C / Sample 0
-                    within_control_fc = control_conc_mean / control_zero_mean  # Control C / Control 0
-                    fold_change = within_sample_fc / within_control_fc
-                    fold_change_rows.append(fold_change)
-                    row_indices.append((conc, rep_idx))
+                )
+                control_conc_mean = np.mean(control_conc_normalized, axis=0)
+                denominator = control_conc_mean / control_zero_mean
             else:
-                # If control doesn't have this concentration, just use control at 0
-                # Fold change: (Sample_C / Sample_0) / Control_0
-                for rep_idx, normalized_rep in enumerate(sample_conc_normalized):
-                    within_sample_fc = normalized_rep / sample_zero_mean  # Sample C / Sample 0
-                    fold_change = within_sample_fc / control_zero_mean
-                    fold_change_rows.append(fold_change)
-                    row_indices.append((conc, rep_idx))
+                # Control lacks this concentration: (Sample_C / Sample_0) / Control_0
+                denominator = control_zero_mean
 
-        # Create DataFrame
-        if fold_change_rows:
-            df = pd.DataFrame(
-                fold_change_rows,
-                index=pd.MultiIndex.from_tuples(row_indices, names=['concentration', 'replicate']),
-                columns=[i for i in range(n_timepoints)]
-            )
-        else:
-            df = pd.DataFrame()
+            fold_change_by_conc[conc] = [
+                (normalized_rep / sample_zero_mean) / denominator
+                for normalized_rep in sample_conc_normalized
+            ]
+
+        if not fold_change_by_conc:
+            return np.empty((n_timepoints, 0, 0)), np.empty(0)
+
+        concentrations = np.array(list(fold_change_by_conc.keys()), dtype=float)
+        n_replicates = max(len(reps) for reps in fold_change_by_conc.values())
+
+        # (n_timepoints, n_replicates, n_concentrations), matching time_series,
+        # blanked_data and normalized_data. Uneven replicate counts are padded
+        # with NaN, as elsewhere.
+        fold_change = np.full((n_timepoints, n_replicates, len(concentrations)), np.nan)
+        for conc_idx, conc in enumerate(concentrations):
+            for rep_idx, series in enumerate(fold_change_by_conc[conc]):
+                length = min(len(series), n_timepoints)
+                fold_change[:length, rep_idx, conc_idx] = series[:length]
+
+        return fold_change, concentrations
 
         return df
 
@@ -899,9 +926,34 @@ class SampleFrame:
                     data_attribute, error_type=error_type
                 )
 
+    @staticmethod
+    def _resolve_fold_change_measurement(sample: 'Sample',
+                                         measurement: Optional[str]) -> Optional[str]:
+        """
+        Pick which measurement's fold change to use.
+
+        An explicit name wins. Otherwise the single measurement present is
+        used, since calculating fold change for one measurement is the common
+        case; with several, the caller has to say which.
+        """
+        available = getattr(sample, 'fold_change', {}) or {}
+
+        if measurement is not None:
+            return measurement if measurement in available else None
+        if len(available) == 1:
+            return next(iter(available))
+        if not available:
+            return None
+
+        raise ValueError(
+            f"Sample '{sample.name}' has fold change for {sorted(available)}; "
+            f"pass measurement= to choose one."
+        )
+
     def calculate_hill_fits(self, timepoint_idx: int,
                            sample_ids: Optional[List[str]] = None,
-                           concentration_idx_range: Optional[Tuple[int, int]] = None) -> Dict[str, Dict[str, float]]:
+                           concentration_idx_range: Optional[Tuple[int, int]] = None,
+                           measurement: Optional[str] = None) -> Dict[str, Dict[str, float]]:
         """
         Fit dose-response data at a specific timepoint to a Hill function.
 
@@ -953,35 +1005,37 @@ class SampleFrame:
 
             sample = self.samples[sample_id]
 
-            if not hasattr(sample, 'fold_change_mean'):
-                print(f"Warning: No fold_change_mean data for {sample_id}")
+            fit_measurement = self._resolve_fold_change_measurement(
+                sample, measurement
+            )
+            if fit_measurement is None:
+                print(f"Warning: No fold change data for {sample_id}")
                 continue
 
-            mean_dict = sample.fold_change_mean
+            all_concentrations, all_fold_changes, _ = sample.fold_change_at_timepoint(
+                fit_measurement, timepoint_idx
+            )
+            if all_concentrations.size == 0:
+                print(f"Warning: No fold change data for {sample_id}")
+                continue
 
-            # Get concentrations
-            all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
+            # Ascending concentration, so concentration_idx_range keeps meaning
+            # "the lowest N doses" independently of the storage order.
+            order = np.argsort(all_concentrations)
+            all_concentrations = all_concentrations[order]
+            all_fold_changes = all_fold_changes[order]
 
             if concentration_idx_range is not None:
                 start_idx, end_idx = concentration_idx_range
-                concentrations = all_concentrations[start_idx:end_idx+1]
+                concentrations = all_concentrations[start_idx:end_idx + 1]
+                fold_changes = all_fold_changes[start_idx:end_idx + 1]
             else:
                 concentrations = all_concentrations
+                fold_changes = all_fold_changes
 
             if len(concentrations) < 3:
                 print(f"Warning: Insufficient data points for {sample_id} (need >= 3)")
                 continue
-
-            # Extract fold change values at timepoint
-            fold_changes = []
-            for conc in concentrations:
-                mean_array = mean_dict[conc]
-                if timepoint_idx >= len(mean_array):
-                    raise IndexError(f"Timepoint index {timepoint_idx} out of range")
-                fold_changes.append(mean_array[timepoint_idx])
-
-            fold_changes = np.array(fold_changes)
-            concentrations = np.array(concentrations)
 
             try:
                 # Initial parameter guesses
@@ -1091,90 +1145,6 @@ class SampleFrame:
             normalized_values.append(normalized)
 
         return np.array(normalized_values)
-    def get_fold_change_dataframes(self, sample_ids: Optional[List[str]] = None,
-                                  data_attribute: str = 'fold_change') -> Tuple['pd.DataFrame', 'pd.DataFrame']:
-        """
-        Get fold change data as two DataFrames: one for means, one for standard deviations.
-
-        Parameters
-        ----------
-        sample_ids : List[str], optional
-            List of sample IDs to include. If None, includes all test samples.
-        data_attribute : str, default 'fold_change'
-            Name of the attribute to extract (e.g., 'fold_change', 'blank_subtracted_timeseries')
-
-        Returns
-        -------
-        Tuple[pd.DataFrame, pd.DataFrame]
-            - Mean DataFrame: rows = samples, columns = concentrations
-            - Std dev DataFrame: rows = samples, columns = concentrations
-            Each cell contains an array of values across timepoints
-
-        Raises
-        ------
-        ValueError
-            If sample_ids are invalid or data attribute not found
-        """
-        import pandas as pd
-
-        if not sample_ids:
-            sample_ids = self.get_test_samples()
-
-        if not sample_ids:
-            raise ValueError("No test samples found")
-
-        # Validate sample IDs
-        for sid in sample_ids:
-            if sid not in self.samples:
-                raise ValueError(f"Sample ID '{sid}' not found")
-
-        # Collect all concentrations across samples
-        all_concentrations = set()
-        for sample_id in sample_ids:
-            sample = self.samples[sample_id]
-            mean_attr = f'{data_attribute}_mean'
-            if hasattr(sample, mean_attr):
-                mean_dict = getattr(sample, mean_attr)
-                all_concentrations.update(mean_dict.keys())
-
-        concentrations = sorted(all_concentrations)
-
-        # Build DataFrames
-        mean_data = {}
-        std_data = {}
-
-        for sample_id in sample_ids:
-            sample = self.samples[sample_id]
-            mean_attr = f'{data_attribute}_mean'
-            error_attr = f'{data_attribute}_error'
-
-            if not hasattr(sample, mean_attr):
-                raise ValueError(f"No {mean_attr} data found for {sample_id}")
-
-            mean_dict = getattr(sample, mean_attr)
-            error_dict = getattr(sample, error_attr)
-
-            mean_row = []
-            std_row = []
-
-            for conc in concentrations:
-                mean_row.append(mean_dict.get(conc, np.nan))
-                std_row.append(error_dict.get(conc, np.nan))
-
-            mean_data[sample_id] = mean_row
-            std_data[sample_id] = std_row
-
-        # Create DataFrames
-        df_mean = pd.DataFrame(mean_data, index=concentrations).T
-        df_std = pd.DataFrame(std_data, index=concentrations).T
-
-        # Rename columns to concentration labels
-        df_mean.columns = [f"C_{c}" for c in concentrations]
-        df_std.columns = [f"C_{c}" for c in concentrations]
-
-        return df_mean, df_std
-
-
     def plot_fold_change_dose_response(self, timepoint_idx: int, **kwargs):
         """Plot dose-response curve. See :func:`fluoropy.core.plotting.plot_fold_change_dose_response`."""
         from .plotting import plot_fold_change_dose_response

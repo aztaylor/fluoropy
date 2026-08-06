@@ -16,6 +16,41 @@ if TYPE_CHECKING:
     import matplotlib.figure
 
 
+def _fold_change_dose_response(frame, sample, measurement, timepoint_idx,
+                               concentration_idx_range=None):
+    """
+    Ascending-concentration dose-response slice for one sample.
+
+    Returns three equal-length 1-D arrays (concentrations, fold change, error),
+    all empty when the sample has no fold change for the measurement. Shared by
+    the dose-response plots so they cannot drift apart in how they read the
+    fold-change layout.
+    """
+    resolved = frame._resolve_fold_change_measurement(sample, measurement)
+    if resolved is None:
+        return np.empty(0), np.empty(0), np.empty(0)
+
+    concentrations, fold_changes, errors = sample.fold_change_at_timepoint(
+        resolved, timepoint_idx
+    )
+    if concentrations.size == 0:
+        return concentrations, fold_changes, errors
+
+    order = np.argsort(concentrations)
+    concentrations = concentrations[order]
+    fold_changes = fold_changes[order]
+    errors = errors[order]
+
+    if concentration_idx_range is not None:
+        start_idx, end_idx = concentration_idx_range
+        sl = slice(start_idx, end_idx + 1)
+        concentrations, fold_changes, errors = (
+            concentrations[sl], fold_changes[sl], errors[sl]
+        )
+
+    return concentrations, fold_changes, errors
+
+
 def _require_matplotlib():
     """Import and return matplotlib.pyplot, raising a clear error if unavailable."""
     try:
@@ -191,9 +226,13 @@ def plot_fold_change_dose_response(frame, timepoint_idx: int,
                                    title: Optional[str] = None,
                                    ylabel: str = "Fold Change",
                                    xlabel: str = "Concentration",
-                                   concentration_idx_range: Optional[Tuple[int, int]] = None):
+                                   concentration_idx_range: Optional[Tuple[int, int]] = None,
+                                   measurement: Optional[str] = None):
     """
     Plot dose-response curve: fold change vs concentration at a specific timepoint.
+
+    ``measurement`` selects which measurement's fold change to plot; it can be
+    omitted when only one has been calculated.
 
     Parameters
     ----------
@@ -248,39 +287,14 @@ def plot_fold_change_dose_response(frame, timepoint_idx: int,
     for color_idx, sample_id in enumerate(sample_ids):
         sample = frame.samples[sample_id]
 
-        if not hasattr(sample, 'fold_change_mean'):
-            print(f"Warning: No fold_change_mean data for {sample_id}")
+        concentrations, fold_changes, errors = _fold_change_dose_response(
+            frame, sample, measurement, timepoint_idx, concentration_idx_range
+        )
+        if concentrations.size == 0:
+            print(f"Warning: No fold change data to plot for {sample_id}")
             continue
 
-        mean_dict = sample.fold_change_mean
-        error_dict = sample.fold_change_error
-
-        all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
-
-        if concentration_idx_range is not None:
-            start_idx, end_idx = concentration_idx_range
-            concentrations = all_concentrations[start_idx:end_idx+1]
-        else:
-            concentrations = all_concentrations
-
-        if not concentrations:
-            print(f"Warning: No concentrations in specified range for {sample_id}")
-            continue
-
-        fold_changes = []
-        errors = []
-
-        for conc in concentrations:
-            mean_array = mean_dict[conc]
-            error_array = error_dict[conc]
-
-            if timepoint_idx >= len(mean_array):
-                raise IndexError(f"Timepoint index {timepoint_idx} out of range (max {len(mean_array)-1})")
-
-            fold_changes.append(mean_array[timepoint_idx])
-            errors.append(error_array[timepoint_idx])
-
-        ax.errorbar(int(concentrations), fold_changes, yerr=errors,
+        ax.errorbar(concentrations, fold_changes, yerr=errors,
                    marker='o', linestyle='-', linewidth=2, markersize=8,
                    capsize=5, capthick=2, label=sample_id, color=colors[color_idx])
 
@@ -486,9 +500,13 @@ def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
                                      ylabel: str = "Fold Change",
                                      xlabel: str = "Concentration",
                                      concentration_idx_range: Optional[Tuple[int, int]] = None,
-                                     num_points: int = 100):
+                                     num_points: int = 100,
+                                     measurement: Optional[str] = None):
     """
     Plot dose-response curve with Hill function fit overlay.
+
+    ``measurement`` selects which measurement's fold change to plot; it can be
+    omitted when only one has been calculated.
 
     Parameters
     ----------
@@ -546,33 +564,12 @@ def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
     for color_idx, sample_id in enumerate(sample_ids):
         sample = frame.samples[sample_id]
 
-        if not hasattr(sample, 'fold_change_mean'):
-            print(f"Warning: No fold_change_mean data for {sample_id}")
+        concentrations, fold_changes, errors = _fold_change_dose_response(
+            frame, sample, measurement, timepoint_idx, concentration_idx_range
+        )
+        if concentrations.size == 0:
+            print(f"Warning: No fold change data to plot for {sample_id}")
             continue
-
-        mean_dict = sample.fold_change_mean
-        error_dict = sample.fold_change_error
-
-        all_concentrations = sorted([c for c in mean_dict.keys() if c != 0.0])
-
-        if concentration_idx_range is not None:
-            start_idx, end_idx = concentration_idx_range
-            concentrations = all_concentrations[start_idx:end_idx+1]
-        else:
-            concentrations = all_concentrations
-
-        if not concentrations:
-            continue
-
-        fold_changes = []
-        errors = []
-        for conc in concentrations:
-            mean_array = mean_dict[conc]
-            error_array = error_dict[conc]
-            if timepoint_idx >= len(mean_array):
-                raise IndexError(f"Timepoint index {timepoint_idx} out of range")
-            fold_changes.append(mean_array[timepoint_idx])
-            errors.append(error_array[timepoint_idx])
 
         ax.errorbar(concentrations, fold_changes, yerr=errors,
                    marker='o', linestyle='', linewidth=2, markersize=8,

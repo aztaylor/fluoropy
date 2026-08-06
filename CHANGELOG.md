@@ -83,6 +83,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fold_change` now uses the same layout as everything else** (breaking).
+  It was a DataFrame indexed by `(concentration, replicate)` with timepoints as
+  columns — the transpose of every other array — and `fold_change_mean` /
+  `fold_change_error` were keyed by concentration rather than by measurement.
+
+  | | before | after |
+  | --- | --- | --- |
+  | `fold_change` | DataFrame, rows `(C, R)`, cols `T` | `dict[measurement]` → `(T, R, C)` |
+  | `fold_change_mean` / `_error` | `dict[concentration]` → `(T,)` | `dict[measurement]` → `(T, C)` |
+
+  Its concentration axis excludes zero — the within-sample reference is not
+  itself a fold change — so it is labelled by the new
+  `Sample.fold_change_concentrations` rather than by `concentrations`.
+
+  `Sample.fold_change_dataframe(measurement)` returns the old tabular form as a
+  view, and `Sample.fold_change_at_timepoint(measurement, t)` gives an aligned
+  `(concentrations, mean, error)` dose-response slice.
+  `calculate_hill_fits` and both dose-response plots take an optional
+  `measurement=`, needed only when fold change has been calculated for more
+  than one.
 - **Array axis conventions are documented** in the `fluoropy.core.sample`
   module docstring and pinned by tests. Per-replicate arrays are
   timepoint-major, `(n_timepoints, n_replicates, n_concentrations)`, and
@@ -100,6 +120,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`matched_control` picked the alphabetically first control type**, so a
+  plate carrying both `WT` and `mRC1.1` matched against `WT` — uppercase sorts
+  before lowercase — rather than against the negative control. It now prefers
+  a control whose role says it is the negative one, falling back to the
+  previous behaviour when no polarity is set.
 - **`calculate_fold_change_statistics()` reduced the wrong axis on dict data.**
   It required `ndim == 2`, but a 2-D array in these dicts is
   `(timepoints, concentrations)` — so it averaged across **concentrations** and
