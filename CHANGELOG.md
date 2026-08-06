@@ -83,6 +83,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The library logs instead of printing.** 66 `print()` calls became
+  `logger.info` (progress) and `logger.warning` (problems), so importing data no
+  longer writes to stdout. Nothing is emitted unless you ask:
+
+  ```python
+  import logging
+  logging.basicConfig(level=logging.INFO)
+  ```
+- **Plate-level statistics moved to `fluoropy.analysis.plate_statistics`** —
+  `calculate_timepoint_statistics`, `get_timepoint_summary_table`,
+  `get_outlier_wells`, and the three z-score functions. `Plate` keeps
+  delegating methods, so `plate.calculate_zscore_normalization(...)` is
+  unchanged; they are now also callable as plain functions. `plate.py` drops
+  from 1421 to 1097 lines.
+- **New well-ID helpers** in `fluoropy.core.well`: `well_id(row, col)`,
+  `parse_well_id(id)`, `row_label(row)`, `row_index(label)`.
+  `parse_well_id` raises on a malformed identifier rather than mis-parsing it.
 - **`fold_change` now uses the same layout as everything else** (breaking).
   It was a DataFrame indexed by `(concentration, replicate)` with timepoints as
   columns — the transpose of every other array — and `fold_change_mean` /
@@ -120,6 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Well IDs past row Z were malformed.** Identifiers were built with
+  `chr(ord('A') + row)` in thirteen places, which runs off the end of the
+  alphabet: a 1536-well plate has 32 rows, so 288 of its wells were named
+  `[1`, `\1`, `]1` and so on. Rows now continue `A`…`Z`, `AA`, `AB`… `AF`.
+  96- and 384-well plates are unaffected (8 and 16 rows).
 - **`matched_control` picked the alphabetically first control type**, so a
   plate carrying both `WT` and `mRC1.1` matched against `WT` — uppercase sorts
   before lowercase — rather than against the negative control. It now prefers

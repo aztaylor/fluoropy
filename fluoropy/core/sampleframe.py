@@ -2,12 +2,15 @@
 SampleFrame class for managing collections of samples from experimental plates.
 """
 
+import logging
 from typing import Dict, List, Optional, Union, Any, Tuple
 import numpy as np
 from collections import defaultdict
 from .plate import Plate
 from .sample import Sample
 from .well import Well
+
+logger = logging.getLogger(__name__)
 class SampleFrame:
     """
     An indexable container for Sample objects from experimental plates.
@@ -366,7 +369,7 @@ class SampleFrame:
         elif hasattr(plate, 'wells') and hasattr(plate.wells, '__iter__'):
             wells = list(plate.wells)
         else:
-            print(f"Warning: Cannot extract wells from plate {plate}")
+            logger.warning(f"Cannot extract wells from plate {plate}")
 
         return wells
 
@@ -492,7 +495,7 @@ class SampleFrame:
             blank_sample = blanks_by_condition.get(blank_key)
 
             if blank_sample is None:
-                print(f"Warning: No blank found for {sample.name} "
+                logger.warning(f"No blank found for {sample.name} "
                       f"(medium={sample.medium}, antibiotics={sample.antibiotics}, "
                       f"plate={sample.plate_id}, inducers={sample.inducers})")
                 continue
@@ -503,7 +506,7 @@ class SampleFrame:
                 matching_blank_wells = [w for w in blank_sample.wells if w.plate_id == sample.plate_id]
 
                 if not matching_blank_wells:
-                    print(f"Warning: No blank wells found on plate {sample.plate_id} for {sample.name}")
+                    logger.warning(f"No blank wells found on plate {sample.plate_id} for {sample.name}")
                     continue
 
                 # Create a temporary Sample with only the matching wells
@@ -546,7 +549,7 @@ class SampleFrame:
 
             # Check if blanked data exists
             if not hasattr(sample, 'blanked_data') or not sample.blanked_data:
-                print(f"Warning: No blank-subtracted timeseries data for {sample.sample_type}. "
+                logger.warning(f"No blank-subtracted timeseries data for {sample.sample_type}. "
                       f"Call calculate_blank_subtracted_timeseries() first.")
                 continue
 
@@ -588,7 +591,7 @@ class SampleFrame:
                 sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
                 sample.normalized_timeseries = sample.normalized_data
             else:
-                print(f"Warning: No blank-subtracted data for {sample.name}. "
+                logger.warning(f"No blank-subtracted data for {sample.name}. "
                       f"Call calculate_blank_subtracted_timeseries() first. "
                       f"Using raw data for normalization.")
                 sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
@@ -627,7 +630,7 @@ class SampleFrame:
 
             # Check if normalized data exists
             if not hasattr(sample, 'normalized_data') or not sample.normalized_data:
-                print(f"Warning: No normalized timeseries data for {sample.sample_type}. "
+                logger.warning(f"No normalized timeseries data for {sample.sample_type}. "
                       f"Call calculate_normalized_timeseries() first.")
                 continue
 
@@ -690,7 +693,7 @@ class SampleFrame:
                         control = cand_sample
                         break
                 if control is None:
-                    print(f"Warning: No negative control found for {sample_id}")
+                    logger.warning(f"No negative control found for {sample_id}")
                     continue
             else:
                 # Per-plate matching - find control on same plate
@@ -699,7 +702,7 @@ class SampleFrame:
                         control = cand_sample
                         break
                 if control is None:
-                    print(f"Warning: No negative control found for {sample_id} on plate {sample.plate_id}")
+                    logger.warning(f"No negative control found for {sample_id} on plate {sample.plate_id}")
                     continue
 
             fold_change, concentrations = self._calculate_individual_fold_changes(
@@ -1000,7 +1003,7 @@ class SampleFrame:
 
         for sample_id in sample_ids:
             if sample_id not in self.samples:
-                print(f"Warning: Sample ID '{sample_id}' not found")
+                logger.warning(f"Sample ID '{sample_id}' not found")
                 continue
 
             sample = self.samples[sample_id]
@@ -1009,14 +1012,14 @@ class SampleFrame:
                 sample, measurement
             )
             if fit_measurement is None:
-                print(f"Warning: No fold change data for {sample_id}")
+                logger.warning(f"No fold change data for {sample_id}")
                 continue
 
             all_concentrations, all_fold_changes, _ = sample.fold_change_at_timepoint(
                 fit_measurement, timepoint_idx
             )
             if all_concentrations.size == 0:
-                print(f"Warning: No fold change data for {sample_id}")
+                logger.warning(f"No fold change data for {sample_id}")
                 continue
 
             # Ascending concentration, so concentration_idx_range keeps meaning
@@ -1034,7 +1037,7 @@ class SampleFrame:
                 fold_changes = all_fold_changes
 
             if len(concentrations) < 3:
-                print(f"Warning: Insufficient data points for {sample_id} (need >= 3)")
+                logger.warning(f"Insufficient data points for {sample_id} (need >= 3)")
                 continue
 
             try:
@@ -1063,7 +1066,7 @@ class SampleFrame:
                     'r_squared': float(r_squared)
                 }
             except Exception as e:
-                print(f"Warning: Hill fit failed for {sample_id}: {e}")
+                logger.warning(f"Hill fit failed for {sample_id}: {e}")
                 continue
 
         # Store results on samples

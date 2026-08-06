@@ -7,12 +7,15 @@ classes. Functions accept core objects as their first argument.
 Requires matplotlib (optional dependency, install with: pip install fluoropy[viz])
 """
 
+import logging
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 
 from .well import row_label
 from .well import well_id as make_well_id
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import matplotlib.pyplot as plt
@@ -294,7 +297,7 @@ def plot_fold_change_dose_response(frame, timepoint_idx: int,
             frame, sample, measurement, timepoint_idx, concentration_idx_range
         )
         if concentrations.size == 0:
-            print(f"Warning: No fold change data to plot for {sample_id}")
+            logger.warning(f"No fold change data to plot for {sample_id}")
             continue
 
         ax.errorbar(concentrations, fold_changes, yerr=errors,
@@ -571,7 +574,7 @@ def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
             frame, sample, measurement, timepoint_idx, concentration_idx_range
         )
         if concentrations.size == 0:
-            print(f"Warning: No fold change data to plot for {sample_id}")
+            logger.warning(f"No fold change data to plot for {sample_id}")
             continue
 
         ax.errorbar(concentrations, fold_changes, yerr=errors,
@@ -726,11 +729,11 @@ def plot_mean_normalized_data(frame, measurement: str,
             continue
 
         if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
-            print(f"Normalized statistics found for {sample_id} with shape {sample.normalized_data_mean.get(measurement).shape if sample.normalized_data_mean.get(measurement) is not None else 'N/A'}")
+            logger.info(f"Normalized statistics found for {sample_id} with shape {sample.normalized_data_mean.get(measurement).shape if sample.normalized_data_mean.get(measurement) is not None else 'N/A'}")
             mean_data = sample.normalized_data_mean.get(measurement)
             error_data = sample.normalized_data_error.get(measurement) if show_error else None
         else:
-            print(f"Warning: No statistics found for {sample_id}, using raw normalized data")
+            logger.warning(f"No statistics found for {sample_id}, using raw normalized data")
             mean_data = sample.normalized_timeseries[measurement]
             error_data = None
 

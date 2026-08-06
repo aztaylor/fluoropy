@@ -29,6 +29,7 @@ reference rather than a fold change of their own. It is therefore labelled by
 :meth:`Sample.fold_change_at_timepoint` for a dose-response slice.
 """
 
+import logging
 from typing import Dict, List, Optional, Any, Union
 import numpy as np
 from .well import (
@@ -41,6 +42,8 @@ from .well import (
     Well,
     canonical_role,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class Sample:
@@ -951,7 +954,7 @@ class Sample:
         use_time_series = od_measurement in self.time_series
 
         if not use_blanked_data and not use_time_series:
-            print(f"Warning: {od_measurement} not found in either blanked data or time series data. Cannot normalize.")
+            logger.warning(f"{od_measurement} not found in either blanked data or time series data. Cannot normalize.")
             return
 
         # Determine data source and issue warnings if needed
@@ -960,7 +963,7 @@ class Sample:
             data_source = self.blanked_data
             data_type_name = "blanked data"
         else:
-            print(f"Warning: Using raw time series data for normalization instead of blanked data. "
+            logger.warning(f"Using raw time series data for normalization instead of blanked data. "
                   f"Consider running calculate_blanked_data() first for more accurate results.")
             od_data = self.time_series[od_measurement]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.time_series
