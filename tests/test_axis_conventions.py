@@ -150,18 +150,51 @@ def test_fold_change_statistics_averages_replicates_not_concentrations(frame):
     assert np.allclose(sample.blanked_data_error["GFP"], expected_sem)
 
 
-def test_fold_change_dataframe_is_documented_as_transposed(frame):
+def test_fold_change_is_timepoint_major_like_everything_else(frame):
     """
-    fold_change is the one exception to timepoint-major: it is indexed by
-    (concentration, replicate) with timepoints as columns. Pinned so the
-    exception stays deliberate rather than becoming a surprise.
+    fold_change used to be the one exception -- a DataFrame indexed by
+    (concentration, replicate) with timepoints as columns, i.e. the transpose
+    of every other array. It now follows the same layout.
     """
     frame.calculate_fold_change("GFP")
-    fold_change = frame["s1"].fold_change
+    sample = frame["s1"]
 
-    assert list(fold_change.index.names) == ["concentration", "replicate"]
-    assert fold_change.shape[1] == N_TIMEPOINTS
-    # Two non-zero concentrations x two replicates.
-    assert fold_change.shape[0] == (N_CONCENTRATIONS - 1) * N_REPLICATES
-    # Transposing recovers the timepoint-major orientation used everywhere else.
-    assert fold_change.T.shape[0] == N_TIMEPOINTS
+    fold_change = sample.fold_change["GFP"]
+    # Zero concentration is the reference, so it is not itself a fold change.
+    assert fold_change.shape == (
+        N_TIMEPOINTS, N_REPLICATES, N_CONCENTRATIONS - 1
+    )
+
+
+def test_fold_change_concentrations_label_the_last_axis(frame):
+    frame.calculate_fold_change("GFP")
+    sample = frame["s1"]
+
+    concentrations = sample.fold_change_concentrations
+
+    assert len(concentrations) == sample.fold_change["GFP"].shape[2]
+    assert 0.0 not in concentrations
+    assert list(concentrations) == sorted(concentrations, reverse=True)
+
+
+def test_fold_change_reduction_drops_the_replicate_axis(frame):
+    frame.calculate_fold_change("GFP")
+    frame.calculate_fold_change_statistics("fold_change")
+    sample = frame["s1"]
+
+    mean = sample.fold_change_mean["GFP"]
+
+    assert mean.shape == (N_TIMEPOINTS, N_CONCENTRATIONS - 1)
+    assert np.allclose(
+        mean, np.nanmean(sample.fold_change["GFP"], axis=1), equal_nan=True
+    )
+
+
+def test_fold_change_dataframe_still_available_for_export(frame):
+    """The tabular form is kept as a view, not as the storage layout."""
+    frame.calculate_fold_change("GFP")
+    table = frame["s1"].fold_change_dataframe("GFP")
+
+    assert list(table.index.names) == ["concentration", "replicate"]
+    assert table.shape[1] == N_TIMEPOINTS
+    assert table.shape[0] == (N_CONCENTRATIONS - 1) * N_REPLICATES

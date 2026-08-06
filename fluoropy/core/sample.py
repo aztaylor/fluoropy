@@ -21,12 +21,12 @@ in step by :meth:`Sample.calculate_statistics`, which rebuilds the arrays
 whenever the axis changes; :meth:`_calculate_measurement_statistics` raises if
 they ever disagree.
 
-The one exception is ``fold_change``, a DataFrame indexed by
-``(concentration, replicate)`` with timepoints as columns -- effectively the
-transpose of the above -- and ``fold_change_mean`` / ``fold_change_error``,
-which are keyed by concentration rather than measurement and hold plain
-``(n_timepoints,)`` arrays. Convert with ``df.T`` if you need it
-timepoint-major.
+``fold_change`` follows the same layout, with one wrinkle: its concentration
+axis excludes zero, since the zero-concentration wells are the within-sample
+reference rather than a fold change of their own. It is therefore labelled by
+``fold_change_concentrations`` instead of ``concentrations``. Use
+:meth:`Sample.fold_change_dataframe` for a tabular view and
+:meth:`Sample.fold_change_at_timepoint` for a dose-response slice.
 """
 
 from typing import Dict, List, Optional, Any, Union
@@ -139,6 +139,16 @@ class Sample:
         self.normalized_data: Dict[str, np.ndarray] = {}   # Normalized raw data
         self.normalized_data_mean: Dict[str, np.ndarray] = {}  # Mean normalized data
         self.normalized_data_error: Dict[str, np.ndarray] = {}  # Error for normalized data
+
+        # Fold change vs the matched control. Same layout as the dicts above:
+        # keyed by measurement, (n_timepoints, n_replicates, n_concentrations).
+        # Its concentration axis excludes zero -- the within-sample reference
+        # is not itself a fold change -- so it is labelled separately by
+        # fold_change_concentrations rather than by self.concentrations.
+        self.fold_change: Dict[str, np.ndarray] = {}
+        self.fold_change_mean: Dict[str, np.ndarray] = {}
+        self.fold_change_error: Dict[str, np.ndarray] = {}
+        self.fold_change_concentrations: Optional[np.ndarray] = None
 
         # Metadata
         self.n_replicates: Dict[str, int] = {}        # Number of replicates per concentration
@@ -965,6 +975,94 @@ class Sample:
 
                 # Calculate normalized data element-wise
                 self.normalized_data[measurement_type] = measurement_data / (od_data + offset)
+
+    def fold_change_at_timepoint(self, measurement_type: str, timepoint_idx: int):
+        """
+        Dose-response slice: fold change against concentration at one timepoint.
+
+        Parameters
+        ----------
+        measurement_type : str
+        timepoint_idx : int
+
+        Returns
+        -------
+        (concentrations, mean, error)
+            Three 1-D arrays of equal length, ordered by the fold-change
+            concentration axis. All empty if no fold change has been
+            calculated for this measurement.
+
+        Raises
+        ------
+        IndexError
+            If timepoint_idx is out of range for the fold-change data.
+        """
+        empty = (np.empty(0), np.empty(0), np.empty(0))
+
+        mean = self.fold_change_mean.get(measurement_type)
+        if mean is None or self.fold_change_concentrations is None or mean.size == 0:
+            return empty
+
+        if timepoint_idx >= mean.shape[0] or timepoint_idx < -mean.shape[0]:
+            raise IndexError(
+                f"Timepoint index {timepoint_idx} out of range for "
+                f"{mean.shape[0]} timepoints"
+            )
+
+        error = self.fold_change_error.get(measurement_type)
+        errors = (
+            error[timepoint_idx]
+            if error is not None and error.shape == mean.shape
+            else np.zeros_like(mean[timepoint_idx])
+        )
+
+        return self.fold_change_concentrations, mean[timepoint_idx], errors
+
+    def fold_change_dataframe(self, measurement_type: str):
+        """
+        Fold change as a tidy DataFrame, for export or inspection.
+
+        ``fold_change`` itself is a numpy array in the package's standard
+        ``(timepoints, replicates, concentrations)`` layout. This renders it
+        as a table indexed by ``(concentration, replicate)`` with timepoints as
+        columns -- the shape ``fold_change`` used to be stored in.
+
+        Parameters
+        ----------
+        measurement_type : str
+
+        Returns
+        -------
+        pandas.DataFrame
+            Empty if there is no fold change for this measurement.
+        """
+        import pandas as pd
+
+        data = self.fold_change.get(measurement_type)
+        if data is None or data.size == 0 or self.fold_change_concentrations is None:
+            return pd.DataFrame()
+
+        n_timepoints, n_replicates, _ = data.shape
+
+        rows, index = [], []
+        for conc_idx, concentration in enumerate(self.fold_change_concentrations):
+            for rep_idx in range(n_replicates):
+                series = data[:, rep_idx, conc_idx]
+                if np.all(np.isnan(series)):
+                    continue  # padding for an uneven replicate count
+                rows.append(series)
+                index.append((float(concentration), rep_idx))
+
+        if not rows:
+            return pd.DataFrame()
+
+        return pd.DataFrame(
+            rows,
+            index=pd.MultiIndex.from_tuples(
+                index, names=["concentration", "replicate"]
+            ),
+            columns=list(range(n_timepoints)),
+        )
 
     def get_data(self, measurement_type: str, data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
         """

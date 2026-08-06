@@ -243,3 +243,61 @@ def test_two_sample_groups_on_separate_plates():
     # Replicate axis alignment
     s1_plate_order = list(dict.fromkeys(w.plate_id for w in frame['s1'].wells))
     assert s1_plate_order == nc1_plates
+
+
+# ---------------------------------------------------------------------------
+# matched_control picks by role, not by spelling
+# ---------------------------------------------------------------------------
+
+def _plate_with_two_control_types(plate_id):
+    """
+    A plate carrying both a positive control named 'WT' and a negative control
+    named 'mRC1.1'. 'WT' sorts first alphabetically because uppercase precedes
+    lowercase, so name-ordering and role disagree here on purpose.
+    """
+    wells = []
+    for idx, (well_id, name, role) in enumerate((
+        ("A1", "s1", "sample"),
+        ("A2", "WT", "positive_control"),
+        ("A3", "mRC1.1", "negative_control"),
+    )):
+        well = _make_well(well_id, 0, idx, name, 0.0, plate_id)
+        well.role = role
+        wells.append(well)
+    return MockPlate(plate_id, wells)
+
+
+def test_matched_control_prefers_the_negative_control():
+    """
+    Regression: matched_control took the alphabetically first control type, so
+    a plate with both 'WT' and 'mRC1.1' matched against 'WT'. Roles make the
+    intent expressible instead of depending on how a control is spelled.
+    """
+    frame = SampleFrame(
+        [_plate_with_two_control_types("P1"), _plate_with_two_control_types("P2")],
+        keep_controls_separate=True,
+    )
+
+    matched = frame["s1"].matched_control
+
+    assert matched is not None
+    assert frame[matched].is_negative_control
+    assert frame[matched].name.startswith("mRC1.1")
+
+
+def test_matched_control_falls_back_when_no_polarity_is_set():
+    """With no negative control marked, any control is better than none."""
+    def _plate(plate_id):
+        wells = []
+        for idx, (well_id, name) in enumerate((("A1", "s1"), ("A2", "WT"))):
+            well = _make_well(well_id, 0, idx, name, 0.0, plate_id,
+                              is_control=(name == "WT"))
+            wells.append(well)
+        return MockPlate(plate_id, wells)
+
+    frame = SampleFrame([_plate("P1"), _plate("P2")], keep_controls_separate=True)
+
+    matched = frame["s1"].matched_control
+
+    assert matched is not None
+    assert frame[matched].is_control
