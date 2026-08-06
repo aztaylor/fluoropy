@@ -20,6 +20,14 @@ from .normalization import (
     percent_inhibition,
     robust_z_score,
 )
+from .plate_statistics import (
+    apply_zscore_normalization,
+    calculate_timepoint_statistics,
+    calculate_zscore_normalization,
+    get_outlier_wells,
+    get_timepoint_summary_table,
+    get_zscore_matrix,
+)
 from .quality import (
     calculate_signal_to_noise,
     calculate_z_factor,
@@ -35,4 +43,11 @@ __all__ = [
     "normalize_to_controls",
     "percent_inhibition",
     "robust_z_score",
+    # Plate-level statistics (also reachable as Plate methods)
+    "calculate_timepoint_statistics",
+    "get_timepoint_summary_table",
+    "get_outlier_wells",
+    "calculate_zscore_normalization",
+    "apply_zscore_normalization",
+    "get_zscore_matrix",
 ]

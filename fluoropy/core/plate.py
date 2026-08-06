@@ -5,11 +5,15 @@ This class focuses solely on organizing and providing access to Well objects,
 with statistical analysis delegated to Sample and SampleFrame classes.
 """
 
+import logging
 from typing import Dict, List, Optional, Any, Union
 import numpy as np
 import pandas as pd
-from .well import Well
+from .well import Well, parse_well_id
+from .well import well_id as make_well_id
 from ..utils.import_data import import_results
+
+logger = logging.getLogger(__name__)
 
 
 class Plate:
@@ -155,7 +159,7 @@ class Plate:
         """Initialize all wells for the plate format."""
         for row in range(self.rows):
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 self.wells[well_id] = Well(well_id, row, col)
                 self.wells[well_id].plate_id = self.plate_id  # Assign plate_id to each well
 
@@ -219,7 +223,7 @@ class Plate:
                 "must also be provided"
             )
 
-        print(f"Loading data from {data_file}...")
+        logger.info(f"Loading data from {data_file}...")
 
         # Import plate reader data
         data_dict, time_dict, meta_data = import_results(
@@ -244,19 +248,19 @@ class Plate:
         # Load inducers
         if inducer_layouts:
             for inducer_name, layout_path in inducer_layouts.items():
-                print(f"Loading inducer '{inducer_name}' from {layout_path}...")
+                logger.info(f"Loading inducer '{inducer_name}' from {layout_path}...")
                 all_molecule_grids[inducer_name] = self._read_grid_csv(layout_path)
 
         # Load antibiotics
         if antibiotic_layouts:
             for antibiotic_name, layout_path in antibiotic_layouts.items():
-                print(f"Loading antibiotic '{antibiotic_name}' from {layout_path}...")
+                logger.info(f"Loading antibiotic '{antibiotic_name}' from {layout_path}...")
                 all_molecule_grids[antibiotic_name] = self._read_grid_csv(layout_path)
 
         # Load other modifications
         if other_modification_layouts:
             for mod_name, layout_path in other_modification_layouts.items():
-                print(f"Loading modification '{mod_name}' from {layout_path}...")
+                logger.info(f"Loading modification '{mod_name}' from {layout_path}...")
                 all_molecule_grids[mod_name] = self._read_grid_csv(layout_path)
 
         # Build concentration map with priority hierarchy
@@ -265,7 +269,7 @@ class Plate:
 
         # Priority 1: Explicit concentration layout
         if concentration_layout is not None:
-            print(f"Using explicit concentration layout as primary concentration...")
+            logger.info(f"Using explicit concentration layout as primary concentration...")
             conc_grid = self._read_grid_csv(concentration_layout)
             for row in range(min(conc_grid.shape[0], self.rows)):
                 for col in range(min(conc_grid.shape[1], self.cols)):
@@ -276,7 +280,7 @@ class Plate:
 
         # Priority 2: Primary molecule (molecule of interest)
         elif primary_molecule is not None and primary_molecule in all_molecule_grids:
-            print(f"Using '{primary_molecule}' as primary concentration...")
+            logger.info(f"Using '{primary_molecule}' as primary concentration...")
             mol_grid = all_molecule_grids[primary_molecule]
             primary_mol_used = primary_molecule
             for row in range(min(mol_grid.shape[0], self.rows)):
@@ -298,7 +302,7 @@ class Plate:
                 first_mol_name = next(iter(other_modification_layouts.keys()))
 
             if first_mol_name:
-                print(f"Using first molecule '{first_mol_name}' as primary concentration...")
+                logger.info(f"Using first molecule '{first_mol_name}' as primary concentration...")
                 mol_grid = all_molecule_grids[first_mol_name]
                 primary_mol_used = first_mol_name
                 for row in range(min(mol_grid.shape[0], self.rows)):
@@ -323,7 +327,7 @@ class Plate:
         # Now populate wells with molecule concentrations and units
         for row in range(self.rows):
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 well = self.wells[well_id]
 
                 # Set molecule of interest (if primary_mol_used was determined)
@@ -370,10 +374,10 @@ class Plate:
 
         # Load media layout (still uses load_layout_csv since it's a string)
         if media_layout is not None:
-            print(f"Loading media layout from {media_layout}...")
+            logger.info(f"Loading media layout from {media_layout}...")
             self.load_layout_csv(media_layout, 'media')
 
-        print(f"✅ Plate '{self.name}' fully loaded and configured")
+        logger.info(f"✅ Plate '{self.name}' fully loaded and configured")
 
     # ======================================================================
     # INDEXING AND ITERATION METHODS
@@ -391,7 +395,7 @@ class Plate:
             if isinstance(col, str):
                 col = int(col) - 1
             if 0 <= row < self.rows and 0 <= col < self.cols:
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 return self.wells[well_id]
         return None
 
@@ -428,7 +432,7 @@ class Plate:
     def get_well_by_position(self, row: int, column: int) -> Optional[Well]:
         """Get well by row (0-based) and column (0-based) indices"""
         if 0 <= row < self.rows and 0 <= column < self.cols:
-            well_id = f"{chr(ord('A') + row)}{column + 1}"
+            well_id = make_well_id(row, column)
             return self.wells[well_id]
         return None
 
@@ -475,7 +479,7 @@ class Plate:
         wells_list = []
         for row in range(self.rows):
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 wells_list.append(self.wells[well_id])
         return wells_list
 
@@ -491,7 +495,7 @@ class Plate:
         for row in range(self.rows):
             row_wells = []
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 row_wells.append(self.wells[well_id])
             rows.append(row_wells)
         return rows
@@ -508,7 +512,7 @@ class Plate:
         for col in range(self.cols):
             col_wells = []
             for row in range(self.rows):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 col_wells.append(self.wells[well_id])
             columns.append(col_wells)
         return columns
@@ -528,7 +532,7 @@ class Plate:
         """
         if 1 <= row_number <= self.rows:
             for col in range(self.cols):
-                well_id = f"{chr(ord('A') + row_number - 1)}{col + 1}"
+                well_id = make_well_id(row_number - 1, col)
                 yield self.wells[well_id]
 
     def iter_wells_by_column(self, column_number: int):
@@ -546,7 +550,7 @@ class Plate:
         """
         if 1 <= column_number <= self.cols:
             for row in range(self.rows):
-                well_id = f"{chr(ord('A') + row)}{column_number}"
+                well_id = make_well_id(row, column_number - 1)
                 yield self.wells[well_id]
 
     # ======================================================================
@@ -584,8 +588,7 @@ class Plate:
                 col_idx = well.column_index
             else:
                 # Parse from well_id
-                row_idx = ord(well.well_id[0]) - ord('A')
-                col_idx = int(well.well_id[1:]) - 1
+                row_idx, col_idx = parse_well_id(well.well_id)
 
             if value_type == "fluorescence" and hasattr(well, 'fluorescence') and well.fluorescence is not None:
                 # Handle both single values and time series
@@ -675,7 +678,7 @@ class Plate:
         time_dict : Dict[str, np.ndarray]
             Dictionary with measurement types as keys and time arrays as values
         """
-        print(f"Loading data into {self.format}-well plate '{self.name}'...")
+        logger.info(f"Loading data into {self.format}-well plate '{self.name}'...")
 
         # Determine the dimensions to iterate over
         if hasattr(sample_map, 'shape'):  # numpy array
@@ -693,7 +696,7 @@ class Plate:
         # Set sample information
         for row in range(max_rows):
             for col in range(max_cols):
-                well_id = f"{chr(ord('A') + row)}{col + 1}"
+                well_id = make_well_id(row, col)
                 well = self.wells[well_id]
 
                 # Extract sample type (handle both numpy arrays and lists)
@@ -719,9 +722,9 @@ class Plate:
                 is_control = str(sample_type) in controls if controls and sample_type else False
 
                 if is_blank:
-                    print(f"Identified blank well: {well_id} (sample type: {sample_type})")
+                    logger.info(f"Identified blank well: {well_id} (sample type: {sample_type})")
                 if is_control:
-                    print(f"Identified control well: {well_id} (sample type: {sample_type})")
+                    logger.info(f"Identified control well: {well_id} (sample type: {sample_type})")
 
                 # Set well attributes directly
                 well.sample_type = sample_type
@@ -746,18 +749,18 @@ class Plate:
 
                 wells_loaded += 1
 
-        print(f"✅ Successfully loaded data into {wells_loaded} wells")
-        print(f"   Sample types found: {len(set(w.sample_type for w in self.wells.values() if w.sample_type))}")
+        logger.info(f"✅ Successfully loaded data into {wells_loaded} wells")
+        logger.info(f"   Sample types found: {len(set(w.sample_type for w in self.wells.values() if w.sample_type))}")
 
         # Only show concentration info if concentrations were provided
         concentrations = [w.concentration for w in self.wells.values() if w.concentration is not None]
         if concentrations:
-            print(f"   Concentration range: {min(concentrations):.6f} - {max(concentrations):.6f}")
-            print(f"   Wells with concentrations: {len(concentrations)}")
+            logger.info(f"   Concentration range: {min(concentrations):.6f} - {max(concentrations):.6f}")
+            logger.info(f"   Wells with concentrations: {len(concentrations)}")
         else:
-            print(f"   No concentrations loaded")
+            logger.info(f"   No concentrations loaded")
 
-        print(f"   Measurements loaded: {list(data_dict.keys())}")
+        logger.info(f"   Measurements loaded: {list(data_dict.keys())}")
 
         # Store measurement types for easy access
         self.measurements = list(data_dict.keys())
@@ -795,33 +798,33 @@ class Plate:
         concentrations = [w.concentration for w in self.wells.values() if w.concentration is not None]
 
         if concentrations:
-            print(f"Concentration Summary for {self.name}:")
-            print(f"  Range: {min(concentrations):.6f} - {max(concentrations):.6f}")
-            print(f"  Unique values: {len(set(concentrations))}")
-            print(f"  Wells with concentrations: {len(concentrations)}")
+            logger.info(f"Concentration Summary for {self.name}:")
+            logger.info(f"  Range: {min(concentrations):.6f} - {max(concentrations):.6f}")
+            logger.info(f"  Unique values: {len(set(concentrations))}")
+            logger.info(f"  Wells with concentrations: {len(concentrations)}")
 
             # Show unique concentrations
             unique_concs = sorted(set(concentrations))
-            print(f"  Unique concentrations: {unique_concs}")
+            logger.info(f"  Unique concentrations: {unique_concs}")
         else:
-            print(f"No concentrations found in plate {self.name}")
+            logger.info(f"No concentrations found in plate {self.name}")
 
     def print_sample_summary(self):
         """Print a summary of sample types in the plate"""
         sample_types = [w.sample_type for w in self.wells.values() if w.sample_type is not None]
 
         if sample_types:
-            print(f"Sample Summary for {self.name}:")
-            print(f"  Unique sample types: {len(set(sample_types))}")
-            print(f"  Wells with samples: {len(sample_types)}")
+            logger.info(f"Sample Summary for {self.name}:")
+            logger.info(f"  Unique sample types: {len(set(sample_types))}")
+            logger.info(f"  Wells with samples: {len(sample_types)}")
 
             # Show sample type counts
             from collections import Counter
             sample_counts = Counter(sample_types)
             for sample_type, count in sample_counts.items():
-                print(f"    {sample_type}: {count} wells")
+                logger.info(f"    {sample_type}: {count} wells")
         else:
-            print(f"No samples found in plate {self.name}")
+            logger.info(f"No samples found in plate {self.name}")
 
     def validate_concentration_loading(self) -> bool:
         """
@@ -834,17 +837,17 @@ class Plate:
         wells_with_conc = [w for w in self.wells.values() if w.concentration is not None]
 
         if not wells_with_conc:
-            print("❌ No wells have concentration data loaded")
+            logger.info("❌ No wells have concentration data loaded")
             return False
 
-        print(f"✅ Concentration validation passed:")
-        print(f"   {len(wells_with_conc)} wells have concentration data")
+        logger.info(f"✅ Concentration validation passed:")
+        logger.info(f"   {len(wells_with_conc)} wells have concentration data")
 
         # Show a few examples
         sample_wells = wells_with_conc[:5]  # First 5 wells with concentrations
-        print(f"   Example wells:")
+        logger.info(f"   Example wells:")
         for well in sample_wells:
-            print(f"     {well.well_id}: {well.sample_type} at {well.concentration}")
+            logger.info(f"     {well.well_id}: {well.sample_type} at {well.concentration}")
 
         return True
 
@@ -861,9 +864,9 @@ class Plate:
             else:
                 well.exclude = True
                 well.exclusion_reason = reason
-            print(f"Excluded well {well_id}: {reason}")
+            logger.info(f"Excluded well {well_id}: {reason}")
         else:
-            print(f"Warning: Well {well_id} not found")
+            logger.warning(f"Well {well_id} not found")
 
     def include_well(self, well_id: str):
         """Include a previously excluded well back in analysis"""
@@ -874,9 +877,9 @@ class Plate:
             else:
                 well.exclude = False
                 well.exclusion_reason = None
-            print(f"Included well {well_id} back in analysis")
+            logger.info(f"Included well {well_id} back in analysis")
         else:
-            print(f"Warning: Well {well_id} not found")
+            logger.warning(f"Well {well_id} not found")
 
     def get_excluded_wells(self) -> List[Well]:
         """Get all excluded wells"""
@@ -935,7 +938,7 @@ class Plate:
 
         for row_idx in range(min(n_rows, self.rows)):
             for col_idx in range(min(n_cols, self.cols)):
-                well_id = f"{chr(ord('A') + row_idx)}{col_idx + 1}"
+                well_id = make_well_id(row_idx, col_idx)
                 well = self.wells.get(well_id)
                 if well is None:
                     continue
@@ -995,425 +998,101 @@ class Plate:
     # STATISTICAL ANALYSIS METHODS
     # ======================================================================
 
+    # These delegate to fluoropy.analysis.plate_statistics, which holds the
+    # implementations. They are kept here because reaching for them through
+    # the plate reads naturally, and because they were methods before the
+    # split. The same arrangement is used for plotting.
+    #
+    # Imports are function-local: analysis imports from core, so importing it
+    # at module scope would be circular.
+
     def calculate_timepoint_statistics(self, measurement_type: str, timepoint_idx: int,
-                                     sample_types: Optional[List[str]] = None,
-                                     exclude_blanks: bool = True,
-                                     exclude_controls: bool = False) -> Dict[str, Dict[str, Any]]:
+                                       sample_types: Optional[List[str]] = None,
+                                       exclude_blanks: bool = True,
+                                       exclude_controls: bool = False) -> Dict[str, Dict[str, Any]]:
         """
-        Calculate summary statistics for each sample type and concentration at a given timepoint.
+        Summary statistics per (sample type, concentration) at one timepoint.
 
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to analyze
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        sample_types : List[str], optional
-            Specific sample types to analyze. If None, analyzes all sample types.
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells from analysis
-        exclude_controls : bool, default False
-            Whether to exclude control wells from analysis
-
-        Returns
-        -------
-        Dict[str, Dict[str, Any]]
-            Dictionary with 'sample_type_concentration' keys, and statistics dictionaries as values.
-            Each statistics dictionary contains: 'mean', 'std', 'sem', 'count', 'min', 'max', 'median', 'q25', 'q75', 'iqr', 'outlier_wells'
-
-        Examples
-        --------
-        >>> stats = plate.calculate_timepoint_statistics('OD600', timepoint_idx=10)
-        >>> print(stats['sample_1_10.0']['mean'])  # Mean OD600 for sample_1 at 10.0 concentration
-        >>> print(stats['sample_1_5.0']['outlier_wells'])  # List of outlier well IDs for sample_1 at 5.0 concentration
+        See :func:`fluoropy.analysis.plate_statistics.calculate_timepoint_statistics`.
         """
-        from collections import defaultdict
-
-        # Group wells by (sample_type, concentration) with well information
-        sample_conc_groups = defaultdict(list)
-
-        for well in self.wells.values():
-            # Skip excluded wells
-            if well.is_excluded():
-                continue
-
-            # Skip wells without the measurement
-            if not (hasattr(well, 'time_series') and measurement_type in well.time_series):
-                continue
-
-            # Skip wells without enough timepoints
-            time_series = well.time_series[measurement_type]
-            if len(time_series) <= timepoint_idx:
-                continue
-
-            # Apply exclusion criteria
-            if exclude_blanks and hasattr(well, 'is_blank') and well.is_blank:
-                continue
-            if exclude_controls and hasattr(well, 'is_control') and well.is_control:
-                continue
-
-            # Get sample type and concentration
-            sample_type = getattr(well, 'sample_type', 'Unknown')
-            concentration = getattr(well, 'concentration', 0.0)
-
-            # Filter by specific sample types if provided
-            if sample_types is not None and sample_type not in sample_types:
-                continue
-
-            # Create group key (sample_type, concentration)
-            group_key = f"{sample_type}_{concentration}"
-
-            # Add value and well information to group
-            value = time_series[timepoint_idx]
-            well_id = getattr(well, 'well_id', getattr(well, 'position', 'Unknown'))
-            sample_conc_groups[group_key].append({'value': value, 'well_id': well_id, 'well': well})
-
-        # Calculate statistics for each (sample_type, concentration) group
-        statistics = {}
-
-        for group_key, well_data_list in sample_conc_groups.items():
-            if not well_data_list:
-                continue
-
-            # Extract values and well information
-            values = [item['value'] for item in well_data_list]
-            well_ids = [item['well_id'] for item in well_data_list]
-            wells = [item['well'] for item in well_data_list]
-
-            values_array = np.array(values)
-
-            # Calculate basic statistics
-            stats = {
-                'mean': np.mean(values_array),
-                'std': np.std(values_array, ddof=1) if len(values_array) > 1 else 0.0,
-                'sem': np.std(values_array, ddof=1) / np.sqrt(len(values_array)) if len(values_array) > 1 else 0.0,
-                'count': len(values_array),
-                'min': np.min(values_array),
-                'max': np.max(values_array),
-                'median': np.median(values_array)
-            }
-
-            # Add quartiles and IQR
-            stats['q25'] = np.percentile(values_array, 25)
-            stats['q75'] = np.percentile(values_array, 75)
-            stats['iqr'] = stats['q75'] - stats['q25']
-
-            # Identify outliers using IQR method (values outside Q1 - 1.5*IQR or Q3 + 1.5*IQR)
-            outlier_wells = []
-            if len(values_array) > 2 and stats['iqr'] > 0:  # Need at least 3 values and non-zero IQR
-                lower_bound = stats['q25'] - 1.5 * stats['iqr']
-                upper_bound = stats['q75'] + 1.5 * stats['iqr']
-
-                for i, value in enumerate(values):
-                    if value < lower_bound or value > upper_bound:
-                        outlier_wells.append({
-                            'well_id': well_ids[i],
-                            'value': value,
-                            'z_score': (value - stats['mean']) / stats['std'] if stats['std'] > 0 else 0
-                        })
-
-            stats['outlier_wells'] = outlier_wells
-            stats['outlier_count'] = len(outlier_wells)
-
-            statistics[group_key] = stats
-
-        return statistics
+        from ..analysis.plate_statistics import calculate_timepoint_statistics
+        return calculate_timepoint_statistics(
+            self, measurement_type, timepoint_idx, sample_types,
+            exclude_blanks, exclude_controls,
+        )
 
     def get_timepoint_summary_table(self, measurement_type: str, timepoint_idx: int,
-                                  sample_types: Optional[List[str]] = None,
-                                  exclude_blanks: bool = True,
-                                  exclude_controls: bool = False,
-                                  include_outliers: bool = True) -> 'pd.DataFrame':
+                                    sample_types: Optional[List[str]] = None,
+                                    exclude_blanks: bool = True,
+                                    exclude_controls: bool = False,
+                                    include_outliers: bool = True) -> 'pd.DataFrame':
         """
-        Get summary statistics as a formatted pandas DataFrame.
+        The same statistics as a formatted DataFrame.
 
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to analyze
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        sample_types : List[str], optional
-            Specific sample types to analyze
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells
-        exclude_controls : bool, default False
-            Whether to exclude control wells
-        include_outliers : bool, default True
-            Whether to include outlier information in the DataFrame
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with sample types as index and statistics as columns.
-            If include_outliers=True, includes 'outlier_count' and 'outlier_wells' columns.
+        See :func:`fluoropy.analysis.plate_statistics.get_timepoint_summary_table`.
         """
-        stats = self.calculate_timepoint_statistics(
-            measurement_type, timepoint_idx, sample_types,
-            exclude_blanks, exclude_controls
+        from ..analysis.plate_statistics import get_timepoint_summary_table
+        return get_timepoint_summary_table(
+            self, measurement_type, timepoint_idx, sample_types,
+            exclude_blanks, exclude_controls, include_outliers,
         )
-
-        if not stats:
-            return pd.DataFrame()
-
-        # Convert to DataFrame
-        df = pd.DataFrame.from_dict(stats, orient='index')
-
-        # Round numeric columns
-        numeric_columns = ['mean', 'std', 'sem', 'min', 'max', 'median', 'q25', 'q75', 'iqr']
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = df[col].round(4)
-
-        if include_outliers:
-            # Format outlier wells for better display
-            if 'outlier_wells' in df.columns:
-                df['outlier_wells_formatted'] = df['outlier_wells'].apply(
-                    lambda x: '; '.join([f"{well['well_id']}({well['value']:.2f})" for well in x]) if x else 'None'
-                )
-
-                # Keep outlier_count for quick reference
-                df['outlier_count'] = df['outlier_count'] if 'outlier_count' in df.columns else 0
-
-                # Reorder columns to put outlier info at the end
-                base_cols = [col for col in df.columns if col not in ['outlier_wells', 'outlier_wells_formatted', 'outlier_count']]
-                outlier_cols = ['outlier_count', 'outlier_wells_formatted']
-                df = df[base_cols + outlier_cols]
-        else:
-            # Remove outlier columns if not wanted
-            outlier_cols = ['outlier_wells', 'outlier_count', 'outlier_wells_formatted']
-            df = df.drop(columns=[col for col in outlier_cols if col in df.columns])
-
-        # Sort by sample type
-        df = df.sort_index()
-
-        return df
 
     def get_outlier_wells(self, measurement_type: str, timepoint_idx: int,
-                         sample_types: Optional[List[str]] = None,
-                         exclude_blanks: bool = True,
-                         exclude_controls: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+                          sample_types: Optional[List[str]] = None,
+                          exclude_blanks: bool = True,
+                          exclude_controls: bool = False) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Get outlier wells for each sample type and concentration at a given timepoint.
+        IQR outliers per (sample type, concentration) group.
 
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to analyze
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        sample_types : List[str], optional
-            Specific sample types to analyze
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells
-        exclude_controls : bool, default False
-            Whether to exclude control wells
-
-        Returns
-        -------
-        Dict[str, List[Dict[str, Any]]]
-            Dictionary with 'sample_type_concentration' keys and lists of outlier well information.
-            Each outlier dictionary contains: 'well_id', 'value', 'z_score'
-
-        Examples
-        --------
-        >>> outliers = plate.get_outlier_wells('OD600', timepoint_idx=10)
-        >>> print(outliers['sample_1_10.0'])  # List of outlier wells for sample_1 at 10.0 concentration
+        See :func:`fluoropy.analysis.plate_statistics.get_outlier_wells`.
         """
-        stats = self.calculate_timepoint_statistics(
-            measurement_type, timepoint_idx, sample_types,
-            exclude_blanks, exclude_controls
+        from ..analysis.plate_statistics import get_outlier_wells
+        return get_outlier_wells(
+            self, measurement_type, timepoint_idx, sample_types,
+            exclude_blanks, exclude_controls,
         )
-
-        outliers = {}
-        for group_key, group_stats in stats.items():
-            if 'outlier_wells' in group_stats:
-                outliers[group_key] = group_stats['outlier_wells']
-
-        return outliers
 
     def calculate_zscore_normalization(self, measurement_type: str, timepoint_idx: int,
-                                     exclude_blanks: bool = True,
-                                     exclude_controls: bool = False) -> Dict[str, float]:
+                                       exclude_blanks: bool = True,
+                                       exclude_controls: bool = False) -> Dict[str, float]:
         """
-        Calculate z-score normalization for all wells at a specific timepoint.
+        Plate-wide z-score per well, using the mean and standard deviation.
 
-        Z-score = (value - mean) / std_dev
-
-        This normalizes values across the entire plate, making it easy to identify
-        wells that deviate significantly from the plate average.
-
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to normalize
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells from the calculation of plate statistics
-        exclude_controls : bool, default False
-            Whether to exclude control wells from the calculation of plate statistics
-
-        Returns
-        -------
-        Dict[str, float]
-            Dictionary with well IDs as keys and z-scores as values.
-            Wells excluded from calculation will not be included in the result.
-
-        Examples
-        --------
-        >>> z_scores = plate.calculate_zscore_normalization('OD600', timepoint_idx=10)
-        >>> print(z_scores['A1'])  # Z-score for well A1
-        >>> extreme_wells = {k: v for k, v in z_scores.items() if abs(v) > 2}  # Wells with |z| > 2
+        See :func:`fluoropy.analysis.plate_statistics.calculate_zscore_normalization`,
+        and :func:`fluoropy.analysis.robust_z_score` for the median/MAD variant.
         """
-        # Collect all values for plate-wide statistics
-        all_values = []
-        well_values = {}
-
-        for well in self.wells.values():
-            # Skip excluded wells
-            if well.is_excluded():
-                continue
-
-            # Skip wells without the measurement
-            if not (hasattr(well, 'time_series') and measurement_type in well.time_series):
-                continue
-
-            # Skip wells without enough timepoints
-            time_series = well.time_series[measurement_type]
-            if len(time_series) <= timepoint_idx:
-                continue
-
-            # Apply exclusion criteria for plate statistics calculation
-            if exclude_blanks and hasattr(well, 'is_blank') and well.is_blank:
-                continue
-            if exclude_controls and hasattr(well, 'is_control') and well.is_control:
-                continue
-
-            # Get well ID and value
-            well_id = getattr(well, 'well_id', getattr(well, 'position', 'Unknown'))
-            value = time_series[timepoint_idx]
-
-            all_values.append(value)
-            well_values[well_id] = value
-
-        if len(all_values) < 2:
-            # Need at least 2 values to calculate standard deviation
-            return {}
-
-        # Calculate plate-wide statistics
-        plate_mean = np.mean(all_values)
-        plate_std = np.std(all_values, ddof=1)
-
-        if plate_std == 0:
-            # If standard deviation is 0, all values are the same
-            return {well_id: 0.0 for well_id in well_values.keys()}
-
-        # Calculate z-scores
-        z_scores = {}
-        for well_id, value in well_values.items():
-            z_scores[well_id] = (value - plate_mean) / plate_std
-
-        return z_scores
+        from ..analysis.plate_statistics import calculate_zscore_normalization
+        return calculate_zscore_normalization(
+            self, measurement_type, timepoint_idx, exclude_blanks, exclude_controls,
+        )
 
     def apply_zscore_normalization(self, measurement_type: str, timepoint_idx: int,
-                                 exclude_blanks: bool = True,
-                                 exclude_controls: bool = False,
-                                 store_in_metadata: bool = True) -> Dict[str, float]:
+                                   exclude_blanks: bool = True,
+                                   exclude_controls: bool = False,
+                                   store_in_metadata: bool = True) -> Dict[str, float]:
         """
-        Apply z-score normalization and optionally store results in well metadata.
+        Calculate z-scores and optionally record them in well metadata.
 
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to normalize
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells from plate statistics calculation
-        exclude_controls : bool, default False
-            Whether to exclude control wells from plate statistics calculation
-        store_in_metadata : bool, default True
-            Whether to store z-scores in well metadata for later access
-
-        Returns
-        -------
-        Dict[str, float]
-            Dictionary with well IDs as keys and z-scores as values
-
-        Examples
-        --------
-        >>> z_scores = plate.apply_zscore_normalization('OD600', timepoint_idx=10)
-        >>> # Z-scores are now stored in each well's metadata
-        >>> well_a1 = plate['A1']
-        >>> print(well_a1.metadata.get('zscore_OD600_tp10'))  # Access stored z-score
+        See :func:`fluoropy.analysis.plate_statistics.apply_zscore_normalization`.
         """
-        z_scores = self.calculate_zscore_normalization(
-            measurement_type, timepoint_idx, exclude_blanks, exclude_controls
+        from ..analysis.plate_statistics import apply_zscore_normalization
+        return apply_zscore_normalization(
+            self, measurement_type, timepoint_idx, exclude_blanks,
+            exclude_controls, store_in_metadata,
         )
-
-        if store_in_metadata:
-            # Store z-scores in well metadata
-            metadata_key = f"zscore_{measurement_type}_tp{timepoint_idx}"
-
-            for well_id, z_score in z_scores.items():
-                well = self.wells.get(well_id)
-                if well:
-                    if not hasattr(well, 'metadata'):
-                        well.metadata = {}
-                    well.metadata[metadata_key] = z_score
-
-        return z_scores
 
     def get_zscore_matrix(self, measurement_type: str, timepoint_idx: int,
-                         exclude_blanks: bool = True,
-                         exclude_controls: bool = False) -> np.ndarray:
+                          exclude_blanks: bool = True,
+                          exclude_controls: bool = False) -> np.ndarray:
         """
-        Get z-scores as a 2D matrix matching the plate layout for visualization.
+        Z-scores as a 2-D array matching the plate layout, for visualization.
 
-        Parameters
-        ----------
-        measurement_type : str
-            Type of measurement to normalize
-        timepoint_idx : int
-            Index of the timepoint to analyze (0-based)
-        exclude_blanks : bool, default True
-            Whether to exclude blank wells from plate statistics calculation
-        exclude_controls : bool, default False
-            Whether to exclude control wells from plate statistics calculation
-
-        Returns
-        -------
-        np.ndarray
-            2D array of z-scores with shape (rows, cols) matching plate layout.
-            Wells excluded from analysis will have NaN values.
-
-        Examples
-        --------
-        >>> z_matrix = plate.get_zscore_matrix('OD600', timepoint_idx=10)
-        >>> import matplotlib.pyplot as plt
-        >>> plt.imshow(z_matrix, cmap='RdBu_r', vmin=-3, vmax=3)
-        >>> plt.colorbar(label='Z-score')
-        >>> plt.title('Plate Z-score Heatmap')
+        See :func:`fluoropy.analysis.plate_statistics.get_zscore_matrix`.
         """
-        z_scores = self.calculate_zscore_normalization(
-            measurement_type, timepoint_idx, exclude_blanks, exclude_controls
+        from ..analysis.plate_statistics import get_zscore_matrix
+        return get_zscore_matrix(
+            self, measurement_type, timepoint_idx, exclude_blanks, exclude_controls,
         )
-
-        # Create matrix with NaN for missing values
-        z_matrix = np.full((self.rows, self.cols), np.nan)
-
-        for well_id, z_score in z_scores.items():
-            well = self.wells.get(well_id)
-            if well:
-                # Parse row and column from well_id
-                row_idx = ord(well_id[0]) - ord('A')
-                col_idx = int(well_id[1:]) - 1
-
-                if 0 <= row_idx < self.rows and 0 <= col_idx < self.cols:
-                    z_matrix[row_idx, col_idx] = z_score
-
-        return z_matrix
 
     def plot_zscore_heatmap(self, measurement_type: str, timepoint_idx: int, **kwargs):
         """Plot z-score heatmap. See :func:`fluoropy.core.plotting.plot_zscore_heatmap`."""

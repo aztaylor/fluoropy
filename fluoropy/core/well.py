@@ -2,8 +2,103 @@
 Plate and Well classes for managing fluorescence assay data.
 """
 
+import re
 from typing import Dict, List, Optional, Tuple, Union, Any
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# Well identifiers
+# ---------------------------------------------------------------------------
+# Rows are labelled A..Z, then AA, AB, ... -- 1536-well plates have 32 rows, so
+# the alphabet runs out. Building an ID with chr(ord('A') + row) yields '[', '\'
+# and ']' past row 25, which is what this package used to do in thirteen
+# separate places.
+
+_WELL_ID_PATTERN = re.compile(r"^([A-Za-z]+)(\d+)$")
+
+
+def row_label(row: int) -> str:
+    """
+    Row index to its plate label.
+
+    >>> row_label(0), row_label(25), row_label(26), row_label(31)
+    ('A', 'Z', 'AA', 'AF')
+
+    Raises
+    ------
+    ValueError
+        If the row index is negative.
+    """
+    if row < 0:
+        raise ValueError(f"Row index must be non-negative, got {row}")
+
+    label = ""
+    n = row + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        label = chr(ord("A") + remainder) + label
+    return label
+
+
+def row_index(label: str) -> int:
+    """
+    Plate row label to its 0-based index. Inverse of :func:`row_label`.
+
+    >>> row_index("A"), row_index("Z"), row_index("AA")
+    (0, 25, 26)
+
+    Raises
+    ------
+    ValueError
+        If the label is empty or contains a non-letter.
+    """
+    if not label or not label.isalpha():
+        raise ValueError(f"Row label must be one or more letters, got {label!r}")
+
+    index = 0
+    for character in label.upper():
+        index = index * 26 + (ord(character) - ord("A") + 1)
+    return index - 1
+
+
+def well_id(row: int, column: int) -> str:
+    """
+    Build a well ID from 0-based row and column indices.
+
+    >>> well_id(0, 0), well_id(7, 11), well_id(26, 0)
+    ('A1', 'H12', 'AA1')
+    """
+    if column < 0:
+        raise ValueError(f"Column index must be non-negative, got {column}")
+    return f"{row_label(row)}{column + 1}"
+
+
+def parse_well_id(identifier: str) -> Tuple[int, int]:
+    """
+    Split a well ID into 0-based (row, column). Inverse of :func:`well_id`.
+
+    >>> parse_well_id("A1"), parse_well_id("H12"), parse_well_id("AA1")
+    ((0, 0), (7, 11), (26, 0))
+
+    Raises
+    ------
+    ValueError
+        If the identifier is not letters followed by digits.
+    """
+    match = _WELL_ID_PATTERN.match(str(identifier).strip())
+    if match is None:
+        raise ValueError(
+            f"Not a well identifier: {identifier!r}. Expected letters followed "
+            f"by digits, e.g. 'A1' or 'AA12'."
+        )
+
+    letters, digits = match.groups()
+    column = int(digits)
+    if column < 1:
+        raise ValueError(f"Column number must be 1-based, got {identifier!r}")
+
+    return row_index(letters), column - 1
+
 
 # ---------------------------------------------------------------------------
 # Well roles
@@ -116,7 +211,7 @@ class Well:
         self.well_id = well_id
         self.row = row  # 0-based row index
         self.column = column  # 0-based column index
-        self.row_letter = chr(ord('A') + row)  # A, B, C, etc.
+        self.row_letter = row_label(row)  # A, B, ... Z, AA, AB, ...
         self.column_number = column + 1  # 1, 2, 3, etc.
 
         # Alternative access for backward compatibility
