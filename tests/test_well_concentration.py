@@ -1,16 +1,17 @@
 """
 Concentration handling on Well.
 
-The xfail-marked tests here document a live defect: Well.set_sample_info()
-accepts a `concentration` argument, documents it, and then never assigns it —
-the value is silently discarded. `_set_concentration()` contains a no-op
-`self.concentration = self.concentration` branch that reads as if it handles
-this case.
+`set_sample_info()` used to accept a `concentration` argument, document it, and
+never assign it -- `_set_concentration()` had a no-op
+`self.concentration = self.concentration` branch that read as if it handled the
+case. The value was silently discarded.
+
+That mattered beyond the obvious: with concentrations dropped, every well in a
+sample collapsed into a single concentration group, which is why some tests
+only passed while the bug was present.
 
 These assertions were rescued from test_validation.py and test_well_only.py
-before those were removed for testing source text rather than behavior. The
-marks are strict, so they fail loudly once the bug is fixed and the marks
-should then be deleted.
+before those were removed for testing source text rather than behaviour.
 """
 
 import pytest
@@ -18,10 +19,6 @@ import pytest
 from fluoropy.core.well import Well
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="set_sample_info() accepts concentration= but never assigns it",
-)
 def test_set_sample_info_stores_concentration():
     well = Well("A1", 0, 0)
     well.set_sample_info("test_sample", concentration=100.0, medium="M9")
@@ -30,10 +27,6 @@ def test_set_sample_info_stores_concentration():
     assert well.medium == "M9"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="set_sample_info() accepts concentration= but never assigns it",
-)
 def test_repr_shows_concentration_set_via_sample_info():
     well = Well("A1", 0, 0)
     well.set_sample_info("test_sample", concentration=5.0)

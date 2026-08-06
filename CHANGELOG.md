@@ -49,9 +49,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `matched_control` attribute.
 - `align_replicates_by_od` for aligning replicate time axes on an OD
   threshold crossing.
+- **`Well.role` / `Sample.role`**, replacing independent `is_blank` and
+  `is_control` fields. One stored string — `sample`, `blank`, `control`,
+  `negative_control` or `positive_control` — with `is_blank`, `is_control`,
+  `is_negative_control` / `is_nc` and `is_positive_control` / `is_pc` derived
+  from it, so they cannot disagree. Assignment still works
+  (`well.is_blank = True` sets the role), so existing code is unaffected.
+  Aliases are accepted on assignment: `nc`, `pc`, `no_effect`, `max_effect`
+  and others; an unrecognised role raises rather than silently creating one.
+
+  "negative" and "positive" describe the **effect** (none vs maximal), not the
+  signal direction. A repressing construct's negative control carries the
+  highest signal, and nothing in the package assumes an ordering between them.
+- `set_sample_info(role=...)`, taking precedence over the legacy flags.
+
+### Changed
+
+- **Identity is one concept under one name.** `Well.sample_name` names the
+  sample a well belongs to (`sample_type` remains as an alias), and
+  `Sample.name` names the sample (`sample_name` and `sample_type` are aliases).
+  A sample's name now always equals the key it is stored under in its
+  `SampleFrame`: composite controls under `keep_controls_separate=True` used to
+  be keyed `NC_1` but named `NC`, so `frame['NC_1'].name` was `'NC'`. The
+  control type now lives in `role`, which frees `name` to be the identifier.
 
 ### Fixed
 
+- **`Well.set_sample_info(concentration=)` silently discarded the value.** The
+  argument was accepted and documented but never assigned;
+  `_set_concentration()` had a no-op `self.concentration = self.concentration`
+  branch that read as if it handled the case. Passing both `concentration` and
+  `moi` now raises instead of being ignored.
+
+  This masked other problems: with concentrations dropped, every well in a
+  sample collapsed into one concentration group. Two further bugs below were
+  only reachable once it was fixed.
+- **Blank subtraction required the blank to have as many replicates as the
+  sample.** Six blank wells against two replicates per concentration — an
+  ordinary layout — raised a broadcast error. A single-condition blank is now
+  reduced to its per-timepoint mean, which is the right treatment anyway: the
+  old behaviour implied a pairing between blank replicate *i* and sample
+  replicate *i* that does not exist.
+- **Fold change subtracted an unreduced 3-D blank.** `_get_normalized_replicate_values`
+  handled only 2-D blank data, so a `time_series` blank broadcast to
+  `(timepoints, replicates, timepoints)` instead of subtracting — producing
+  silently wrong numbers, and a pandas "Must pass 2-d input" error when the
+  result reached a DataFrame.
+- **`Sample` had no `sample_type`**, so the two `sampleframe.py` warning paths
+  that reference it raised `AttributeError` instead of warning.
 - **Concentration axis mislabelling in `Sample`.** `time_series_mean[:, i]` could
   carry a different concentration's data than `concentrations[i]` claimed,
   silently — the arithmetic succeeded and produced plausible numbers. Two
@@ -74,8 +119,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-Covered by a strict `xfail` test, so it will fail loudly when fixed:
-
-- `Well.set_sample_info(concentration=)` accepts and documents the argument
-  but never assigns it; the value is silently discarded. Assign
-  `well.concentration` directly, or use `moi=`.
+None outstanding. The suite carries no `xfail` markers.
