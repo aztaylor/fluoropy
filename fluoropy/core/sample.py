@@ -149,6 +149,9 @@ class Sample:
         self.antibiotics: Optional[Dict[str, np.ndarray]] = None
         self.inducers: Optional[Dict[str, np.ndarray]] = None  # e.g., {'IPTG': np.array([1.0, 2.0, 3.0])}
         self.other_modifications: Optional[Dict[str, np.ndarray]] = None
+        # Non-chemical construct/strain properties, taken from the wells. See
+        # Well.strain_modifications.
+        self.strain_modifications: List[str] = []
         # Role is stored once; is_blank / is_control / is_nc / is_pc derive
         # from it, matching Well.
         self._role: str = ROLE_SAMPLE
@@ -367,6 +370,7 @@ class Sample:
         self.antibiotics = dict(first_well.antibiotics) if first_well.antibiotics else {}
         self.inducers = dict(first_well.inducers) if first_well.inducers else {}
         self.other_modifications = dict(first_well.other_modifications) if first_well.other_modifications else {}
+        self.strain_modifications = list(first_well.strain_modifications or [])
         self.role = first_well.role
         self.plate_id = first_well.plate_id
         self.moi = first_well.moi

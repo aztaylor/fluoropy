@@ -62,6 +62,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signal direction. A repressing construct's negative control carries the
   highest signal, and nothing in the package assumes an ordering between them.
 - `set_sample_info(role=...)`, taking precedence over the legacy flags.
+- **Role-aware control lookup.** `calculate_z_factor`, `normalize_to_controls`
+  and `percent_inhibition` find their controls from the plate's roles when the
+  well lists are omitted, and `calculate_signal_to_noise` defaults its
+  background to the blanks. Explicit lists still take precedence — which wells
+  serve as the reference can depend on the comparison being made, not just on
+  the well. Omitting them when no well carries the role raises a message
+  naming both fixes.
+- **`Well.strain_modifications` / `Sample.strain_modifications`** are now
+  defined and propagated (previously settable but read by nothing). This is
+  where non-chemical construct properties live — `'non-targeting'`,
+  `'dCas12a'`, a plasmid variant — i.e. *why* a well plays the role it plays.
+  A negative control that is an RNP with a non-targeting guide is
+  `role='negative_control'` plus
+  `strain_modifications=['non-targeting']`, inducer and all.
+
+  They are deliberately excluded from the blank- and control-matching keys:
+  two constructs in the same medium legitimately share a blank, and matching
+  on them would silently orphan samples with no construct-specific blank.
 
 ### Changed
 

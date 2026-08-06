@@ -9,12 +9,13 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from ._extract import all_well_values, well_values
+from ..core.well import ROLE_NEGATIVE_CONTROL, ROLE_POSITIVE_CONTROL
+from ._extract import all_well_values, resolve_controls, well_values
 
 
 def calculate_z_factor(plate, measurement: str,
-                       positive_controls: List[str],
-                       negative_controls: List[str],
+                       positive_controls: Optional[List[str]] = None,
+                       negative_controls: Optional[List[str]] = None,
                        timepoint_idx: int = -1) -> float:
     """
     Z'-factor for assay quality (Zhang, Chung & Oldenburg 1999).
@@ -29,8 +30,11 @@ def calculate_z_factor(plate, measurement: str,
     plate : Plate
     measurement : str
         Measurement key, e.g. ``"GFP"``.
-    positive_controls, negative_controls : list of str
-        Well positions for each control set. At least two usable wells each.
+    positive_controls, negative_controls : list of str, optional
+        Well positions for each control set, at least two usable wells each.
+        If omitted, the wells whose ``role`` is ``'positive_control'`` /
+        ``'negative_control'`` are used. Pass them explicitly when the
+        reference depends on the comparison rather than on the well.
     timepoint_idx : int, default -1
         Timepoint to evaluate; the default is the endpoint.
 
@@ -43,8 +47,16 @@ def calculate_z_factor(plate, measurement: str,
     Raises
     ------
     ValueError
-        If either control set yields fewer than two usable wells.
+        If either control set yields fewer than two usable wells, or if it was
+        omitted and no well carries the corresponding role.
     """
+    positive_controls = resolve_controls(
+        plate, positive_controls, ROLE_POSITIVE_CONTROL, "positive"
+    )
+    negative_controls = resolve_controls(
+        plate, negative_controls, ROLE_NEGATIVE_CONTROL, "negative"
+    )
+
     pos, pos_ids = well_values(plate, positive_controls, measurement, timepoint_idx)
     neg, neg_ids = well_values(plate, negative_controls, measurement, timepoint_idx)
 
@@ -63,7 +75,7 @@ def calculate_z_factor(plate, measurement: str,
 
 def calculate_signal_to_noise(plate, measurement: str,
                               signal_wells: List[str],
-                              background_wells: List[str],
+                              background_wells: Optional[List[str]] = None,
                               timepoint_idx: int = -1) -> float:
     """
     Signal-to-noise ratio: ``(mean_signal - mean_background) / std_background``.
@@ -71,12 +83,24 @@ def calculate_signal_to_noise(plate, measurement: str,
     Returns ``inf`` when the background has no spread but the signal exceeds
     it, and ``-inf`` when it falls below.
 
+    Parameters
+    ----------
+    background_wells : list of str, optional
+        Defaults to the plate's blank wells.
+
     Raises
     ------
     ValueError
         If fewer than two usable background wells are found, since the
-        background standard deviation is undefined below that.
+        background standard deviation is undefined below that, or if none were
+        given and the plate has no blanks.
     """
+    from ..core.well import ROLE_BLANK
+
+    background_wells = resolve_controls(
+        plate, background_wells, ROLE_BLANK, "background"
+    )
+
     signal, _ = well_values(plate, signal_wells, measurement, timepoint_idx)
     background, bg_ids = well_values(
         plate, background_wells, measurement, timepoint_idx

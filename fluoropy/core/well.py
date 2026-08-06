@@ -138,8 +138,16 @@ class Well:
         self.inducers_units: Dict[str, str] = {}  # e.g., {'aTc': 'ng/mL', 'IPTG': 'mM'}
         self.other_modifications_units: Dict[str, str] = {}  # e.g., {'supplement': 'g/L'}
 
-        # Strain modifications (non-chemical)
-        self.strain_modifications: Optional[List[str]] = None
+        # Non-chemical properties of the construct or strain in this well:
+        # "non-targeting", "dCas12a", "delta-recA", a plasmid variant, and so
+        # on. This is the place for *why* a well plays the role it plays --
+        # a negative control that is an RNP with a non-targeting guide is
+        # role='negative_control' plus strain_modifications=['non-targeting'].
+        #
+        # Kept out of the condition keys used for blank and control matching:
+        # two constructs in the same medium legitimately share a blank, and
+        # making them match separately would silently orphan samples.
+        self.strain_modifications: List[str] = []
 
         # Molecule of interest (which molecule's concentration is "the" concentration)
         self.moi: Optional[str] = None
@@ -339,7 +347,8 @@ class Well:
         self.sample_name = sample_type
         self.medium = medium
         self.moi = moi
-        self.strain_modifications = strain_modifications
+        if strain_modifications is not None:
+            self.strain_modifications = list(strain_modifications)
 
         if role is not None:
             self.role = role

@@ -11,7 +11,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from ._extract import well_values
+from ..core.well import ROLE_NEGATIVE_CONTROL, ROLE_POSITIVE_CONTROL
+from ._extract import resolve_controls, well_values
 
 # Scale factor making the MAD a consistent estimator of the standard
 # deviation for normally distributed data.
@@ -20,8 +21,8 @@ _MAD_TO_SIGMA = 1.4826
 
 def normalize_to_controls(plate, measurement: str,
                           test_wells: List[str],
-                          positive_controls: List[str],
-                          negative_controls: List[str],
+                          positive_controls: Optional[List[str]] = None,
+                          negative_controls: Optional[List[str]] = None,
                           timepoint_idx: int = -1) -> Dict[str, float]:
     """
     Express each test well as a percentage of the control window.
@@ -32,6 +33,16 @@ def normalize_to_controls(plate, measurement: str,
     outside that range are not clipped -- a well above 100% genuinely exceeded
     the positive control and that is worth seeing.
 
+    The window is signed, so it does not matter which control sits higher: a
+    repressing construct whose negative control carries the most signal
+    normalizes the same way.
+
+    Parameters
+    ----------
+    positive_controls, negative_controls : list of str, optional
+        Default to the wells whose ``role`` says so. Pass them explicitly when
+        the reference depends on the comparison rather than on the well.
+
     Returns
     -------
     dict
@@ -41,9 +52,17 @@ def normalize_to_controls(plate, measurement: str,
     Raises
     ------
     ValueError
-        If either control set has no usable wells, or if the two control
-        means coincide (no window to normalize against).
+        If either control set has no usable wells, if one was omitted and no
+        well carries the corresponding role, or if the two control means
+        coincide (no window to normalize against).
     """
+    positive_controls = resolve_controls(
+        plate, positive_controls, ROLE_POSITIVE_CONTROL, "positive"
+    )
+    negative_controls = resolve_controls(
+        plate, negative_controls, ROLE_NEGATIVE_CONTROL, "negative"
+    )
+
     pos, _ = well_values(plate, positive_controls, measurement, timepoint_idx)
     neg, _ = well_values(plate, negative_controls, measurement, timepoint_idx)
 
@@ -69,7 +88,7 @@ def normalize_to_controls(plate, measurement: str,
 
 def percent_inhibition(plate, measurement: str,
                        test_wells: List[str],
-                       control_wells: List[str],
+                       control_wells: Optional[List[str]] = None,
                        timepoint_idx: int = -1) -> Dict[str, float]:
     """
     Percent reduction relative to uninhibited controls.
@@ -79,11 +98,22 @@ def percent_inhibition(plate, measurement: str,
     0% means no inhibition, 100% means signal fully abolished. Negative values
     indicate the well exceeded the control.
 
+    Parameters
+    ----------
+    control_wells : list of str, optional
+        The uninhibited reference. Defaults to the plate's negative controls,
+        which is what "uninhibited" means here: the no-effect condition.
+
     Raises
     ------
     ValueError
-        If no usable control wells are found, or their mean is zero.
+        If no usable control wells are found, none were given and no well
+        carries the negative-control role, or their mean is zero.
     """
+    control_wells = resolve_controls(
+        plate, control_wells, ROLE_NEGATIVE_CONTROL, "negative"
+    )
+
     control, _ = well_values(plate, control_wells, measurement, timepoint_idx)
 
     if len(control) == 0:

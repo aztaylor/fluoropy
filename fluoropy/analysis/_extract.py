@@ -75,6 +75,64 @@ def well_values(plate, well_ids: Iterable[str], measurement: str,
     return np.asarray(values, dtype=float), used
 
 
+def wells_with_role(plate, role: str, skip_excluded: bool = True) -> List[str]:
+    """
+    Well positions carrying ``role``, in row-major order.
+
+    Parameters
+    ----------
+    plate : Plate
+    role : str
+        A role or alias accepted by :func:`fluoropy.core.well.canonical_role`.
+    skip_excluded : bool, default True
+
+    Returns
+    -------
+    list of str
+        Well positions. Empty if no well carries the role.
+    """
+    from ..core.well import canonical_role
+
+    wanted = canonical_role(role)
+
+    return [
+        well_id
+        for well_id in plate.wells
+        if plate.wells[well_id].role == wanted
+        and not (skip_excluded and plate.wells[well_id].is_excluded())
+    ]
+
+
+def resolve_controls(plate, given: Optional[Iterable[str]], role: str,
+                     label: str) -> List[str]:
+    """
+    Use explicitly supplied control wells, or fall back to the plate's roles.
+
+    Explicit wells always win. A control's role is a sensible default, but it
+    is only a default: which wells serve as the reference can depend on the
+    comparison being made, and the caller knows that better than the plate
+    does.
+
+    Raises
+    ------
+    ValueError
+        If nothing was supplied and no well carries the role, with a pointer
+        to both ways of fixing it.
+    """
+    if given is not None:
+        return list(given)
+
+    found = wells_with_role(plate, role)
+    if not found:
+        raise ValueError(
+            f"No {label} control wells given, and no well on plate "
+            f"'{plate.name}' has role '{role}'. Either pass the wells "
+            f"explicitly, or set the role on them "
+            f"(e.g. plate['A1'].role = '{role}')."
+        )
+    return found
+
+
 def all_well_values(plate, measurement: str, timepoint_idx: int = -1,
                     skip_excluded: bool = True,
                     exclude_blanks: bool = False,
