@@ -65,6 +65,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Array axis conventions are documented** in the `fluoropy.core.sample`
+  module docstring and pinned by tests. Per-replicate arrays are
+  timepoint-major, `(n_timepoints, n_replicates, n_concentrations)`, and
+  reducing across replicates drops the middle axis without reordering the rest.
+  `fold_change` is the one deliberate exception — a DataFrame indexed by
+  `(concentration, replicate)` with timepoints as columns, i.e. the transpose —
+  and that is now stated rather than left to be discovered.
 - **Identity is one concept under one name.** `Well.sample_name` names the
   sample a well belongs to (`sample_type` remains as an alias), and
   `Sample.name` names the sample (`sample_name` and `sample_type` are aliases).
@@ -75,6 +82,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`calculate_fold_change_statistics()` reduced the wrong axis on dict data.**
+  It required `ndim == 2`, but a 2-D array in these dicts is
+  `(timepoints, concentrations)` — so it averaged across **concentrations** and
+  reported the result as a replicate mean, dividing the SEM by the
+  concentration count. The 3-D arrays that actually hold replicates
+  (`blanked_data`, `normalized_data` — the attributes its own docstring
+  recommends) failed the check and were skipped silently. It now delegates to
+  `Sample.calculate_data_source_statistics()`, which reduces the replicate axis
+  correctly.
 - **`Well.set_sample_info(concentration=)` silently discarded the value.** The
   argument was accepted and documented but never assigned;
   `_set_concentration()` had a no-op `self.concentration = self.concentration`

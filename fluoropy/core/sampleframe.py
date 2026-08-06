@@ -884,17 +884,20 @@ class SampleFrame:
                         n_replicates = conc_data.shape[0]
                         error_dict[concentration] = np.std(conc_data, axis=0, ddof=1) / np.sqrt(n_replicates)
 
-            # Handle dict of numpy arrays format
+            # Handle dict of numpy arrays format.
+            #
+            # Delegated rather than reimplemented. This branch used to reduce
+            # only 2-D arrays over axis=1 -- but in these dicts a 2-D array is
+            # (timepoints, concentrations), so it averaged across
+            # CONCENTRATIONS and reported the result as a replicate mean, with
+            # the SEM divided by the concentration count. The 3-D arrays that
+            # actually hold replicates (blanked_data, normalized_data -- the
+            # attributes this method's docstring recommends) failed the ndim
+            # check and were skipped in silence.
             elif isinstance(data, dict):
-                for measurement_type, data_array in data.items():
-                    if data_array is not None and len(data_array.shape) == 2:
-                        mean_dict[measurement_type] = np.mean(data_array, axis=1)
-
-                        if error_type == 'std':
-                            error_dict[measurement_type] = np.std(data_array, axis=1, ddof=1)
-                        elif error_type == 'sem':
-                            n_replicates = data_array.shape[1]
-                            error_dict[measurement_type] = np.std(data_array, axis=1, ddof=1) / np.sqrt(n_replicates)
+                sample.calculate_data_source_statistics(
+                    data_attribute, error_type=error_type
+                )
 
     def calculate_hill_fits(self, timepoint_idx: int,
                            sample_ids: Optional[List[str]] = None,
