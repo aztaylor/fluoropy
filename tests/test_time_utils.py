@@ -258,7 +258,9 @@ class TestAlignReplicatesByOD:
 
         assert stats["trimmed_duration"] == pytest.approx(56.0)
         assert stats["average_start_time"] == pytest.approx(4.5)
+        assert stats["start_time_std"] == pytest.approx(1.5)
         assert stats["average_stop_time"] == pytest.approx(60.5)
+        assert stats["stop_time_std"] == pytest.approx(5.5)
 
     def test_missing_od_measurement_raises(self):
         rep0 = [0.0, 0.5, 1.0] * 4

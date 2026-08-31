@@ -67,7 +67,8 @@ def align_replicates_by_od(
         New frame with aligned, rectangular time series.
     tuple[SampleFrame, dict[str, float]]
         Returned when ``return_alignment_stats`` is True. The stats keys are
-        ``trimmed_duration``, ``average_start_time``, and ``average_stop_time``.
+        ``trimmed_duration``, ``average_start_time``, ``start_time_std``,
+        ``average_stop_time``, and ``stop_time_std``.
     """
     from fluoropy.core.sample import Sample
     from fluoropy.core.sampleframe import SampleFrame
@@ -261,7 +262,9 @@ def align_replicates_by_od(
         stats = {
             "trimmed_duration": float(np.mean(stop_times) - np.mean(start_times)),
             "average_start_time": float(np.mean(start_times)),
+            "start_time_std": float(np.std(start_times)),
             "average_stop_time": float(np.mean(stop_times)),
+            "stop_time_std": float(np.std(stop_times)),
         }
         return new_frame, stats
 
