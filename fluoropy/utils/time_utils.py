@@ -24,7 +24,8 @@ def align_replicates_by_od(
     min_timepoints: int = 10,
     conc_idx_for_shift: int = -1,
     error_type: str = "std",
-    blanks = None
+    blanks=None,
+    return_alignment_stats: bool = False,
 ) -> "SampleFrame":
     """
     Return a new SampleFrame whose time axes are aligned so that t=0 is the
@@ -55,11 +56,18 @@ def align_replicates_by_od(
         Sample IDs that are blank samples.  Blanks are never used for OD
         threshold detection or replicate dropping; instead all their replicates
         are kept and cropped to ``global_len`` from timepoint 0.
+    return_alignment_stats : bool, default False
+        If True, return ``(aligned_frame, stats)``. The stats contain the
+        trimmed duration and the average start and stop times in the source
+        time axis.
 
     Returns
     -------
     SampleFrame
         New frame with aligned, rectangular time series.
+    tuple[SampleFrame, dict[str, float]]
+        Returned when ``return_alignment_stats`` is True. The stats keys are
+        ``trimmed_duration``, ``average_start_time``, and ``average_stop_time``.
     """
     from fluoropy.core.sample import Sample
     from fluoropy.core.sampleframe import SampleFrame
@@ -105,6 +113,8 @@ def align_replicates_by_od(
     # ------------------------------------------------------------------ #
     surviving: dict[str, list[int]] = {}   # sid -> list of surviving rep indices
     trimmed_lengths: list[int] = []
+    start_times: list[float] = []
+    stop_times: list[float] = []
 
     for sid, sample in frame.samples.items():
         # Blanks are trimmed to global_len from index 0 — skip survival logic
@@ -135,6 +145,14 @@ def align_replicates_by_od(
     global_len = min(trimmed_lengths)
     if global_len < 1:
         raise ValueError(f"Aligned global length is {global_len} — no usable data.")
+
+    for sid, sample in frame.samples.items():
+        if blanks is not None and sid in blanks:
+            continue
+        for r in surviving[sid]:
+            start_index = shift_indices[sid][r]
+            start_times.append(float(sample.time[start_index]))
+            stop_times.append(float(sample.time[start_index + global_len - 1]))
 
     # ------------------------------------------------------------------ #
     # Phase C – build trimmed Sample objects                              #
@@ -238,5 +256,13 @@ def align_replicates_by_od(
     new_frame.ignored_sample_types = frame.ignored_sample_types
     new_frame.keep_controls_separate = frame.keep_controls_separate
     new_frame.samples = {sid: trimmed_samples[sid] for sid in frame.samples}
+
+    if return_alignment_stats:
+        stats = {
+            "trimmed_duration": float(np.mean(stop_times) - np.mean(start_times)),
+            "average_start_time": float(np.mean(start_times)),
+            "average_stop_time": float(np.mean(stop_times)),
+        }
+        return new_frame, stats
 
     return new_frame
