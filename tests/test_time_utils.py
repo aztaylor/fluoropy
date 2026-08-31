@@ -242,6 +242,26 @@ class TestAlignReplicatesByOD:
         expected = time[2:11] - time[2]
         assert np.allclose(ns.time, expected)
 
+    def test_returns_trimmed_duration_and_original_time_summary(self):
+        time = np.array([0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 21.0, 28.0, 36.0, 45.0, 55.0, 66.0])
+        rep0 = [0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+        rep1 = [0.0, 0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+        frame = _make_frame({"s1": _make_sample("s1", [rep0, rep1], time=time)})
+
+        _, stats = align_replicates_by_od(
+            frame,
+            "OD600",
+            od_threshold=0.5,
+            min_timepoints=1,
+            return_alignment_stats=True,
+        )
+
+        assert stats["trimmed_duration"] == pytest.approx(56.0)
+        assert stats["average_start_time"] == pytest.approx(4.5)
+        assert stats["start_time_std"] == pytest.approx(1.5)
+        assert stats["average_stop_time"] == pytest.approx(60.5)
+        assert stats["stop_time_std"] == pytest.approx(5.5)
+
     def test_missing_od_measurement_raises(self):
         rep0 = [0.0, 0.5, 1.0] * 4
         sample = _make_sample("s1", [rep0])
