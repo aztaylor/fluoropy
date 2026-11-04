@@ -9,8 +9,6 @@ Tests the separation of concerns:
 - SampleFrame: Indexable sample collection
 """
 
-import traceback
-
 import numpy as np
 
 
@@ -19,20 +17,9 @@ def test_new_architecture():
     print("🧪 Testing New Fluoropy Architecture")
     print("=" * 50)
 
-    # Test imports
-    try:
-        print("Testing imports...")
-        from fluoropy.core import Plate, Sample, SampleFrame, Well  # noqa: F401
-
-        print("✅ Successfully imported: Plate, Well, Sample, SampleFrame")
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        traceback.print_exc()
-        return False
-    except Exception as e:
-        print(f"❌ Unexpected error during import: {e}")
-        traceback.print_exc()
-        return False
+    # An import failure must fail the test. This used to catch it, print it
+    # and return False, which pytest counts as a pass.
+    from fluoropy.core import Plate, Sample, SampleFrame, Well  # noqa: F401
 
     # Test 1: Create a simple plate and wells
     print("\n📋 Test 1: Basic Plate and Well Creation")

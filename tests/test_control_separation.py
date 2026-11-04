@@ -324,10 +324,9 @@ def test_missing_blank_warning():
 
     # sample_A should NOT have blanked_data because no matching blank
     sample_a = frame["sample_A"]
-    if "OD600" in sample_a.blanked_data:
-        print("❌ FAILURE: sample_A should not have blanked_data (no matching blank)")
-    else:
-        print("✅ SUCCESS: Warning correctly shown for missing blank\n")
+    assert (
+        "OD600" not in sample_a.blanked_data
+    ), "sample_A should not have blanked_data (no matching blank)"
 
 
 def run_all_tests():
