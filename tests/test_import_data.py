@@ -4,6 +4,7 @@ import os
 import tempfile
 
 import numpy as np
+import pytest
 
 from fluoropy.utils.import_data import import_results
 
@@ -111,3 +112,54 @@ def test_time_header_does_not_increment_timepoint():
     finally:
         os.unlink(path_with)
         os.unlink(path_without)
+
+
+def _rows(times):
+    return [
+        (t, [float(i), float(i + 1), float(i + 2), float(i + 3)])
+        for i, t in enumerate(times)
+    ]
+
+
+def _import(content, run_time, sampling_rate):
+    path = _write_temp_file(content)
+    try:
+        return import_results(
+            path,
+            n_rows=1,
+            n_cols=4,
+            run_time=run_time,
+            sampling_rate=sampling_rate,
+            read_labels=["600"],
+        )
+    finally:
+        os.unlink(path)
+
+
+def test_decimal_sampling_rate_keeps_every_read():
+    """int(0.7 / 0.1) is 6, which used to drop the seventh read."""
+    times = [f"0:{6 * i:02d}:00" for i in range(1, 8)]  # every 0.1 h, 7 reads
+    data, time, _ = _import(_make_gen5_txt("600", 1, 4, _rows(times), False), 0.7, 0.1)
+
+    assert data["600"].shape == (1, 4, 7)
+    assert time["600"][-1, 0] == pytest.approx(0.7)
+    np.testing.assert_array_equal(data["600"][0, :, 6], [6.0, 7.0, 8.0, 9.0])
+
+
+def test_reads_beyond_run_time_are_kept_not_dropped():
+    """A read at t = 0 makes one more row than run_time / sampling_rate."""
+    times = ["0:00:00", "0:01:00", "0:02:00"]
+    data, time, _ = _import(
+        _make_gen5_txt("600", 1, 4, _rows(times), False), 2 / 60, 1 / 60
+    )
+
+    assert data["600"].shape == (1, 4, 3)
+    np.testing.assert_array_equal(data["600"][0, :, 2], [2.0, 3.0, 4.0, 5.0])
+
+
+def test_non_time_lines_after_a_read_are_ignored():
+    content = _make_gen5_txt("600", 1, 4, _rows(["0:01:00", "0:02:00"]), False)
+    content += "Results\tsomething\nWell\tA1\tA2\n"
+    data, _, _ = _import(content, 2 / 60, 1 / 60)
+
+    assert data["600"].shape == (1, 4, 2)
