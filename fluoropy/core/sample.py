@@ -48,6 +48,23 @@ from .well import (
 logger = logging.getLogger(__name__)
 
 
+def _freeze_conditions(conditions: Optional[Dict[str, Any]]) -> frozenset:
+    """
+    Hashable form of an antibiotics / inducers / modifications dict.
+
+    Wells store these values as plain numbers (``{'aTc': 100.0}``), and
+    callers sometimes pass arrays. Both are reduced to a tuple of floats, so
+    ``100.0`` and ``np.array([100.0])`` give the same key. This used to call
+    ``tuple(value)`` directly, which raised ``TypeError`` on the float that
+    every plate loader actually stores -- so blank subtraction crashed for any
+    plate with an inducer or antibiotic layout.
+    """
+    return frozenset(
+        (name, tuple(float(x) for x in np.ravel(value)))
+        for name, value in (conditions or {}).items()
+    )
+
+
 class Sample:
     """
     Represents a sample with multiple replicates.
@@ -170,11 +187,11 @@ class Sample:
 
         # Sample properties (taken from first well)
         self.medium: Optional[str] = None
-        self.antibiotics: Optional[Dict[str, np.ndarray]] = None
-        self.inducers: Optional[Dict[str, np.ndarray]] = (
-            None  # e.g., {'IPTG': np.array([1.0, 2.0, 3.0])}
-        )
-        self.other_modifications: Optional[Dict[str, np.ndarray]] = None
+        self.antibiotics: Optional[Dict[str, float]] = None
+        # Taken from the first well, like the other condition dicts, e.g.
+        # {'aTc': 100.0}. See _freeze_conditions for how they are matched.
+        self.inducers: Optional[Dict[str, float]] = None
+        self.other_modifications: Optional[Dict[str, float]] = None
         # Non-chemical construct/strain properties, taken from the wells. See
         # Well.strain_modifications.
         self.strain_modifications: List[str] = []
@@ -318,23 +335,19 @@ class Sample:
         """
         return (
             self.medium,
-            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            _freeze_conditions(self.antibiotics),
             self.plate_id,
-            frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items()),
-            frozenset(
-                (k, tuple(v)) for k, v in (self.other_modifications or {}).items()
-            ),
+            _freeze_conditions(self.inducers),
+            _freeze_conditions(self.other_modifications),
         )
 
     def condition_key_no_inducers(self) -> tuple:
         """Return condition key without inducer info, for match_inducers=False."""
         return (
             self.medium,
-            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            _freeze_conditions(self.antibiotics),
             self.plate_id,
-            frozenset(
-                (k, tuple(v)) for k, v in (self.other_modifications or {}).items()
-            ),
+            _freeze_conditions(self.other_modifications),
         )
 
     def get_matching_key(
@@ -376,7 +389,7 @@ class Sample:
         # Start with medium and antibiotics (always included)
         key_parts = [
             self.medium,
-            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            _freeze_conditions(self.antibiotics),
         ]
 
         # Conditionally include plate_id for per-plate matching
@@ -385,16 +398,10 @@ class Sample:
 
         # Conditionally include inducers
         if match_inducers:
-            key_parts.append(
-                frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items())
-            )
+            key_parts.append(_freeze_conditions(self.inducers))
 
         # Always include other_modifications
-        key_parts.append(
-            frozenset(
-                (k, tuple(v)) for k, v in (self.other_modifications or {}).items()
-            )
-        )
+        key_parts.append(_freeze_conditions(self.other_modifications))
 
         return tuple(key_parts)
 
