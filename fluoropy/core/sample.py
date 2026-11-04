@@ -30,7 +30,7 @@ reference rather than a fold change of their own. It is therefore labelled by
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -63,6 +63,21 @@ def _freeze_conditions(conditions: Optional[Dict[str, Any]]) -> frozenset:
         (name, tuple(float(x) for x in np.ravel(value)))
         for name, value in (conditions or {}).items()
     )
+
+
+def _fit_length(trace, n_timepoints: int) -> np.ndarray:
+    """
+    A 1-D float trace cut, or NaN-padded, to exactly ``n_timepoints``.
+
+    Replicates on different plates can have different run lengths. Padding
+    with NaN keeps a short trace from broadcasting, or from being silently
+    stretched, against a longer one.
+    """
+    trace = np.asarray(trace, dtype=float).ravel()
+    fitted = np.full(n_timepoints, np.nan)
+    length = min(len(trace), n_timepoints)
+    fitted[:length] = trace[:length]
+    return fitted
 
 
 class Sample:
@@ -201,6 +216,11 @@ class Sample:
         self.matched_control: Optional[str] = (
             None  # ID of matched control Sample (when keep_controls_separate=True)
         )
+        # Which well fills each (replicate, concentration) slot of
+        # time_series, per measurement: replicate_wells[m][c][r]. Lets a
+        # caller treat each replicate by its own well -- its plate, say --
+        # rather than assuming the whole sample shares one.
+        self.replicate_wells: Dict[str, List[List[Well]]] = {}
 
         # Initialize from wells if provided
         if wells:
@@ -227,6 +247,20 @@ class Sample:
     # `name` is the identifier, and it always equals the key this sample is
     # stored under in its SampleFrame. The aliases exist because wells call the
     # same concept sample_name / sample_type.
+
+    @property
+    def plate_ids(self) -> List[Optional[str]]:
+        """
+        Every plate this sample has (non-excluded) wells on, in well order.
+
+        Prefer this to :attr:`plate_id`, which is only the *first* well's
+        plate. A sample merged across plates has several.
+        """
+        seen: Dict[Optional[str], None] = {}
+        for well in self.wells:
+            if not well.is_excluded():
+                seen.setdefault(well.plate_id, None)
+        return list(seen)
 
     @property
     def sample_name(self) -> str:
@@ -484,6 +518,7 @@ class Sample:
 
         # Clear existing data
         self.time_series.clear()
+        self.replicate_wells = {}
 
         for measurement_type in measurement_types:
             # Group wells by concentration
@@ -499,7 +534,7 @@ class Sample:
                 conc = well.concentration if well.concentration is not None else 0.0
                 if conc not in concentration_groups:
                     concentration_groups[conc] = []
-                concentration_groups[conc].append(measurement_data)
+                concentration_groups[conc].append((well, measurement_data))
 
             # Build array for this measurement type if we have data
             if not concentration_groups:
@@ -512,7 +547,7 @@ class Sample:
             else:
                 n_timepoints = 0
                 for data_list in concentration_groups.values():
-                    for data in data_list:
+                    for _, data in data_list:
                         n_timepoints = max(n_timepoints, len(data))
 
             if n_timepoints == 0:
@@ -544,7 +579,7 @@ class Sample:
             # Populate array. A concentration with no wells keeps its NaN
             # column, holding the position so column i stays axis[i].
             for conc_idx, concentration in enumerate(axis):
-                for rep_idx, data in enumerate(
+                for rep_idx, (_, data) in enumerate(
                     concentration_groups.get(concentration, ())
                 ):
                     actual_len = min(len(data), n_timepoints)
@@ -553,6 +588,9 @@ class Sample:
                     ]
 
             self.time_series[measurement_type] = time_series_array
+            self.replicate_wells[measurement_type] = [
+                [well for well, _ in concentration_groups.get(c, ())] for c in axis
+            ]
 
     def add_well(self, well: Well):
         """
@@ -1034,6 +1072,50 @@ class Sample:
                     )
 
                 self.blanked_data[measurement_type] = sample_data - blank_data
+
+    def subtract_blank_by_well(
+        self,
+        baseline_for: Callable[[Well, str], np.ndarray],
+        measurement_types: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Blank-subtract each replicate against a baseline chosen for its well.
+
+        Unlike :meth:`calculate_blanked_data`, which applies one blank to every
+        replicate, this asks ``baseline_for(well, measurement)`` for the 1-D
+        background trace of each replicate's own well. That is what lets a
+        sample spanning several plates be blanked plate by plate.
+
+        Parameters
+        ----------
+        baseline_for : callable
+            ``(well, measurement) -> 1-D array`` of background per timepoint.
+            Traces are truncated, or padded with NaN, to this sample's time
+            axis. It may raise to signal that no baseline exists; nothing is
+            stored in that case, so a sample is never left half blanked.
+        measurement_types : list of str, optional
+            Defaults to every measurement in ``time_series``.
+        """
+        if measurement_types is None:
+            measurement_types = list(self.time_series.keys())
+
+        results = {}
+        for measurement_type in measurement_types:
+            if measurement_type not in self.time_series:
+                continue
+            data = self.time_series[measurement_type]
+            n_timepoints = data.shape[0]
+            blanked = data.copy()
+            slots = self.replicate_wells.get(measurement_type, [])
+            for conc_idx, wells in enumerate(slots):
+                for rep_idx, well in enumerate(wells):
+                    baseline = _fit_length(
+                        baseline_for(well, measurement_type), n_timepoints
+                    )
+                    blanked[:, rep_idx, conc_idx] -= baseline
+            results[measurement_type] = blanked
+
+        self.blanked_data.update(results)
 
     def calculate_normalized_data(
         self,

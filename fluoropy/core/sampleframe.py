@@ -9,10 +9,98 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from .plate import Plate
-from .sample import Sample
-from .well import Well
+from .sample import Sample, _fit_length
+from .well import ROLE_CONTROL, Well
 
 logger = logging.getLogger(__name__)
+
+
+class MissingReferenceError(LookupError):
+    """A replicate has no blank or control on its plate to compare against."""
+
+
+def _concentration(well: Well) -> float:
+    return well.concentration if well.concentration is not None else 0.0
+
+
+def _wells_by_concentration(sample: Sample) -> Dict[float, List[Well]]:
+    """Non-excluded wells grouped by concentration, in the sample's well order."""
+    groups: Dict[float, List[Well]] = {}
+    for well in sample.wells:
+        if not well.is_excluded():
+            groups.setdefault(_concentration(well), []).append(well)
+    return groups
+
+
+def _well_trace(well: Well, measurement: str) -> Optional[np.ndarray]:
+    """
+    One well's trace, cut to its own run length.
+
+    Import arrays are pre-allocated, so a plate that ran short carries trailing
+    zeros in both its time points and its data. Those are dropped here, by the
+    same rule Sample uses for its time axis, rather than averaged in as zero
+    background.
+    """
+    series = well.time_series.get(measurement)
+    if series is None:
+        return None
+    series = np.asarray(series, dtype=float).ravel()
+    if well.time_points is not None:
+        time_points = np.asarray(well.time_points).ravel()
+        if np.any(time_points != 0):
+            series = series[: int(np.max(np.nonzero(time_points))) + 1]
+    return series
+
+
+class _BlankBaselines:
+    """
+    Per-well background traces from a blank Sample, callable as
+    ``baselines(well, measurement)``.
+
+    With ``per_plate`` the baseline for a well is the mean of the blank's wells
+    on that well's own plate; otherwise the mean over every plate. A blank laid
+    out at several concentrations (an autofluorescent inducer, say) is matched
+    by concentration too; a single-condition blank applies at every
+    concentration.
+    """
+
+    def __init__(self, blank: Sample, per_plate: bool):
+        self.name = blank.name
+        self.per_plate = per_plate
+        wells = [w for w in blank.wells if not w.is_excluded()]
+        self.by_concentration = len({_concentration(w) for w in wells}) > 1
+        self._groups: Dict[tuple, List[Well]] = defaultdict(list)
+        for well in wells:
+            self._groups[self._key(well)].append(well)
+        self._cache: Dict[tuple, np.ndarray] = {}
+
+    def _key(self, well: Well) -> tuple:
+        return (
+            well.plate_id if self.per_plate else None,
+            _concentration(well) if self.by_concentration else None,
+        )
+
+    def __call__(self, well: Well, measurement: str) -> np.ndarray:
+        key = self._key(well)
+        if (key, measurement) not in self._cache:
+            traces = [
+                trace
+                for trace in (_well_trace(w, measurement) for w in self._groups[key])
+                if trace is not None
+            ]
+            if not traces:
+                plate, concentration = key
+                where = f" on plate {plate}" if self.per_plate else ""
+                if self.by_concentration:
+                    where += f" at concentration {concentration}"
+                raise MissingReferenceError(
+                    f"no {measurement} readings from blank '{self.name}'{where}"
+                )
+            stacked = np.full((len(traces), max(len(t) for t in traces)), np.nan)
+            for row, trace in enumerate(traces):
+                stacked[row, : len(trace)] = trace
+            self._cache[(key, measurement)] = np.nanmean(stacked, axis=0)
+        return self._cache[(key, measurement)]
 
 
 class SampleFrame:
@@ -392,7 +480,16 @@ class SampleFrame:
                 for ct in candidates
                 if self.samples[plate_set_ctrl_to_nc_id[(ps, ct)]].is_negative_control
             ]
-            preferred = negative or candidates
+            # Never a positive control: it is the maximal-effect condition,
+            # not the baseline a fold change is taken against.
+            not_positive = [
+                ct
+                for ct in candidates
+                if not self.samples[
+                    plate_set_ctrl_to_nc_id[(ps, ct)]
+                ].is_positive_control
+            ]
+            preferred = negative or not_positive
 
             sample.matched_control = (
                 plate_set_ctrl_to_nc_id[(ps, preferred[0])] if preferred else None
@@ -413,62 +510,6 @@ class SampleFrame:
             logger.warning(f"Cannot extract wells from plate {plate}")
 
         return wells
-
-    def _create_mean_blank(
-        self, blank_sample: "Sample", measurement_types: List[str]
-    ) -> "Sample":
-        """
-        Create a blank Sample with mean values across all wells.
-
-        This is used when pooling blanks across plates to avoid broadcasting issues.
-
-        Parameters
-        ----------
-        blank_sample : Sample
-            The original blank sample with multiple wells
-        measurement_types : List[str]
-            Measurement types to include
-
-        Returns
-        -------
-        Sample
-            A new Sample with a single "mean well" containing averaged blank values
-        """
-        from .well import Well
-
-        # Create a dummy well with mean blank values
-        mean_well = Well("mean_blank", 0, 0)
-        mean_well.plate_id = blank_sample.plate_id
-        mean_well.medium = blank_sample.medium
-        mean_well.antibiotics = blank_sample.antibiotics
-        mean_well.inducers = blank_sample.inducers
-        mean_well.is_blank = True
-
-        # Calculate mean time series for each measurement type
-        for measurement_type in measurement_types:
-            if measurement_type in blank_sample.time_series:
-                # Get time series data: (n_timepoints, n_replicates, n_concentrations)
-                data = blank_sample.time_series[measurement_type]
-
-                # Average across replicates (axis=1)
-                mean_data = np.nanmean(
-                    data, axis=1
-                )  # Shape: (n_timepoints, n_concentrations)
-
-                # For a blank with one concentration, take the first (and only) concentration
-                if mean_data.shape[1] == 1:
-                    mean_data = mean_data[:, 0]  # Shape: (n_timepoints,)
-
-                mean_well.time_series[measurement_type] = mean_data
-
-        # Set time points
-        if blank_sample.time is not None:
-            mean_well.time_points = blank_sample.time.copy()
-
-        # Create a Sample with this single mean well
-        mean_blank_sample = Sample(blank_sample.name, [mean_well])
-
-        return mean_blank_sample
 
     def _calculate_data_statistics(
         self,
@@ -554,27 +595,16 @@ class SampleFrame:
                 )
                 continue
 
-            # If using per-plate matching, filter blank wells to only those from the same plate
-            if not pool_controls and blank_sample is not None:
-                # Filter blank wells by plate_id
-                matching_blank_wells = [
-                    w for w in blank_sample.wells if w.plate_id == sample.plate_id
-                ]
-
-                if not matching_blank_wells:
-                    logger.warning(
-                        f"No blank wells found on plate {sample.plate_id} for {sample.name}"
-                    )
-                    continue
-
-                # Create a temporary Sample with only the matching wells
-                filtered_blank = Sample(blank_sample.name, matching_blank_wells)
-                sample.calculate_blanked_data(filtered_blank, measurement_types)
-            else:
-                # Use all blank wells (pooled across plates)
-                # Create a mean blank to avoid broadcasting issues with multiple replicates
-                mean_blank = self._create_mean_blank(blank_sample, measurement_types)
-                sample.calculate_blanked_data(mean_blank, measurement_types)
+            # Each replicate is blanked against its own plate's blank wells
+            # (or against all of them, pooled). This used to filter the blank
+            # by sample.plate_id -- the *first* well's plate -- so every
+            # replicate of a sample spanning plates got plate 1's background.
+            baselines = _BlankBaselines(blank_sample, per_plate=not pool_controls)
+            measured = [m for m in measurement_types if m in blank_sample.time_series]
+            try:
+                sample.subtract_blank_by_well(baselines, measured)
+            except MissingReferenceError as exc:
+                logger.warning(f"Not blank-subtracting {sample.name}: {exc}")
 
     def calculate_blank_subtracted_timeseries_statistics(
         self, measurement_types: Optional[List[str]] = None, error_type: str = "std"
@@ -761,39 +791,94 @@ class SampleFrame:
             if sample.is_blank or sample.is_control:
                 continue
 
-            # Find matching negative control
-            control = None
-            if pool_controls:
-                # Pool across plates - find first control (all controls are merged in one Sample)
-                for cand_id, cand_sample in self.samples.items():
-                    if cand_sample.is_control:
-                        control = cand_sample
-                        break
-                if control is None:
-                    logger.warning(f"No negative control found for {sample_id}")
-                    continue
-            else:
-                # Per-plate matching - find control on same plate
-                for cand_id, cand_sample in self.samples.items():
-                    if (
-                        cand_sample.is_control
-                        and cand_sample.plate_id == sample.plate_id
-                    ):
-                        control = cand_sample
-                        break
-                if control is None:
-                    logger.warning(
-                        f"No negative control found for {sample_id} on plate {sample.plate_id}"
-                    )
-                    continue
+            control = self._reference_control(sample_id, sample, pool_controls)
+            if control is None:
+                continue
 
-            fold_change, concentrations = self._calculate_individual_fold_changes(
-                sample, control, measurement, od_measurement, alpha, pool_controls
-            )
+            try:
+                fold_change, concentrations = self._calculate_individual_fold_changes(
+                    sample, control, measurement, od_measurement, alpha, pool_controls
+                )
+            except MissingReferenceError as exc:
+                logger.warning(f"No fold change for {sample_id}: {exc}")
+                continue
 
             # Keyed by measurement, like every other data dict on Sample.
             sample.fold_change[measurement] = fold_change
             sample.fold_change_concentrations = concentrations
+
+    def _reference_control(
+        self, sample_id: str, sample: Sample, pool_controls: bool
+    ) -> Optional[Sample]:
+        """
+        The control a sample's fold change is taken against.
+
+        ``sample.matched_control`` wins when set -- by
+        ``keep_controls_separate``, or by hand. Otherwise the frame's one
+        negative control is used, or failing that its one control of
+        unspecified polarity. A positive control is never the reference: it is
+        the maximal-effect condition, not the baseline. With per-plate
+        matching, a candidate must have wells on every plate the sample does.
+
+        This used to take the first sample with ``is_control`` set, of any
+        polarity, and ignore ``matched_control``.
+
+        Returns None, with a warning, when nothing qualifies. Raises when
+        several do, since choosing between them would be a guess.
+        """
+        if sample.matched_control is not None:
+            control = self.samples.get(sample.matched_control)
+            if control is None:
+                raise KeyError(
+                    f"frame['{sample_id}'].matched_control is "
+                    f"'{sample.matched_control}', which is not in this frame"
+                )
+            return control
+
+        candidates = [
+            (cid, c) for cid, c in self.samples.items() if c.is_negative_control
+        ] or [(cid, c) for cid, c in self.samples.items() if c.role == ROLE_CONTROL]
+
+        if not pool_controls:
+            needed = set(sample.plate_ids)
+            candidates = [
+                (cid, c) for cid, c in candidates if needed <= set(c.plate_ids)
+            ]
+
+        if not candidates:
+            where = (
+                ""
+                if pool_controls
+                else f" covering plate(s) {', '.join(map(str, sample.plate_ids))}"
+            )
+            logger.warning(
+                f"No negative control found for {sample_id}{where}. Give one "
+                f"role='negative_control', or set "
+                f"frame['{sample_id}'].matched_control."
+            )
+            return None
+
+        if len(candidates) > 1:
+            names = ", ".join(repr(cid) for cid, _ in candidates)
+            raise ValueError(
+                f"Several controls could be the fold-change reference for "
+                f"'{sample_id}': {names}. Choose one with "
+                f"frame['{sample_id}'].matched_control = '<control id>'."
+            )
+        return candidates[0][1]
+
+    def _blank_baselines_for(
+        self, sample: Sample, per_plate: bool
+    ) -> Optional[_BlankBaselines]:
+        """Baselines from the blank matching ``sample``'s medium and additives."""
+        key = sample.get_matching_key(pool_across_plates=True, match_inducers=False)
+        blank = None
+        for candidate in self.samples.values():
+            if candidate.is_blank and key == candidate.get_matching_key(
+                pool_across_plates=True, match_inducers=False
+            ):
+                blank = candidate
+        return _BlankBaselines(blank, per_plate) if blank is not None else None
 
     def _calculate_individual_fold_changes(
         self,
@@ -808,10 +893,15 @@ class SampleFrame:
         Calculate fold change for individual replicates with proper normalization.
 
         Process for each replicate:
-        1. Normalize sample at conc C by OD: blanked_measurement / (alpha + blanked_OD)
-        2. Normalize sample at conc 0 by OD: blanked_measurement / (alpha + blanked_OD)
-        3. Calculate within-sample fold change: normalized_sample_C / normalized_sample_0
-        4. Normalize by control: within_sample_FC / normalized_control_0
+        1. Normalize by OD: (measurement - blank) / (alpha + OD - blank_OD)
+        2. Within-sample fold change: normalized_sample_C / mean normalized_sample_0
+        3. Divide by the control's own change at C (Control_C / Control_0), or,
+           where the control has no wells at C, by Control_0.
+
+        Every reference is per plate unless ``pool_controls``: a replicate on
+        plate P is compared with its sample's zero-dose wells on P, the
+        control's wells on P, and P's blank. Pooled, each is the mean over all
+        plates. This used to use the sample's first plate for every replicate.
 
         Returns
         -------
@@ -821,100 +911,67 @@ class SampleFrame:
             ``time_series`` / ``blanked_data`` / ``normalized_data``.
             ``concentrations`` labels the last axis, descending, and excludes
             zero -- the within-sample reference is not itself a fold change.
+
+        Raises
+        ------
+        ValueError
+            If the sample or control has no zero-concentration wells at all.
+        MissingReferenceError
+            If a replicate's plate lacks a blank, zero-dose sample wells or
+            control wells that the comparison needs.
         """
+        per_plate = not pool_controls
+        sample_blank = self._blank_baselines_for(sample, per_plate)
+        control_blank = self._blank_baselines_for(control, per_plate)
 
-        # Find the blank samples for both sample and control using get_matching_key
-        # Note: Blank keys always exclude plate_id since blanks are merged across plates
-        blanks_by_key: Dict[tuple, "Sample"] = {}
-        for s in self.samples.values():
-            if s.is_blank:
-                key = s.get_matching_key(pool_across_plates=True, match_inducers=False)
-                blanks_by_key[key] = s
+        sample_by_conc = _wells_by_concentration(sample)
+        control_by_conc = _wells_by_concentration(control)
+        if 0.0 not in sample_by_conc:
+            raise ValueError(
+                f"No zero-concentration wells found in sample '{sample.name}'"
+            )
+        if 0.0 not in control_by_conc:
+            raise ValueError(
+                f"No zero-concentration wells found in control '{control.name}'"
+            )
 
-        # Find blanks for sample and control (always use pool_across_plates=True for blank lookup)
-        blank_key = sample.get_matching_key(
-            pool_across_plates=True, match_inducers=False
-        )
-        blank = blanks_by_key.get(blank_key)
+        if sample.time is not None:
+            n_timepoints = len(sample.time)
+        else:
+            n_timepoints = max(
+                len(w.time_series.get(measurement, ())) for w in sample.wells
+            )
 
-        control_blank_key = control.get_matching_key(
-            pool_across_plates=True, match_inducers=False
-        )
-        control_blank = blanks_by_key.get(control_blank_key)
+        def plate_of(well: Well):
+            return well.plate_id if per_plate else None
 
-        # Filter blank wells by plate_id if using per-plate matching
-        if not pool_controls:
+        def normalized(well: Well, blank: Optional[_BlankBaselines]) -> np.ndarray:
+            signal = well.time_series.get(measurement)
+            od = well.time_series.get(od_measurement)
+            if signal is None or od is None:
+                raise ValueError(
+                    f"Missing measurement or OD data in well {well.well_id}"
+                )
+            signal = _fit_length(signal, n_timepoints)
+            od = _fit_length(od, n_timepoints)
             if blank is not None:
-                matching_wells = [
-                    w for w in blank.wells if w.plate_id == sample.plate_id
-                ]
-                if matching_wells:
-                    blank = Sample(blank.name, matching_wells)
-                else:
-                    blank = None
+                signal = signal - _fit_length(blank(well, measurement), n_timepoints)
+                od = od - _fit_length(blank(well, od_measurement), n_timepoints)
+            return signal / (alpha + od)
 
-            if control_blank is not None:
-                matching_wells = [
-                    w for w in control_blank.wells if w.plate_id == control.plate_id
-                ]
-                if matching_wells:
-                    control_blank = Sample(control_blank.name, matching_wells)
-                else:
-                    control_blank = None
+        def mean_per_plate(wells, blank) -> Dict[Optional[str], np.ndarray]:
+            traces = defaultdict(list)
+            for well in wells:
+                traces[plate_of(well)].append(normalized(well, blank))
+            return {plate: np.mean(t, axis=0) for plate, t in traces.items()}
 
-        # Group sample wells by concentration
-        sample_wells_by_conc = {}
-        for well in sample.wells:
-            if well.is_excluded():
-                continue
-            conc = well.concentration if well.concentration is not None else 0.0
-            if conc not in sample_wells_by_conc:
-                sample_wells_by_conc[conc] = []
-            sample_wells_by_conc[conc].append(well)
+        def on_plate(table, plate, what):
+            if plate not in table:
+                raise MissingReferenceError(f"no {what} on plate {plate}")
+            return table[plate]
 
-        # Group control wells by concentration
-        control_wells_by_conc = {}
-        for well in control.wells:
-            if well.is_excluded():
-                continue
-            conc = well.concentration if well.concentration is not None else 0.0
-            if conc not in control_wells_by_conc:
-                control_wells_by_conc[conc] = []
-            control_wells_by_conc[conc].append(well)
-
-        # Get sample wells at zero concentration (for normalization)
-        sample_zero_wells = sample_wells_by_conc.get(0.0, [])
-        if not sample_zero_wells:
-            raise ValueError("No zero-concentration wells found in sample")
-
-        # Get control wells at zero concentration
-        control_zero_wells = control_wells_by_conc.get(0.0, [])
-        if not control_zero_wells:
-            raise ValueError("No zero-concentration wells found in control")
-
-        # Extract time points
-        time_points = (
-            sample.time
-            if sample.time is not None
-            else np.arange(len(sample_zero_wells[0].time_series[measurement]))
-        )
-        n_timepoints = len(time_points)
-
-        # Calculate normalized values for sample at zero concentration
-        sample_zero_normalized = self._get_normalized_replicate_values(
-            sample_zero_wells, blank, measurement, od_measurement, alpha
-        )  # Shape: (n_replicates, n_timepoints)
-        sample_zero_mean = np.mean(
-            sample_zero_normalized, axis=0
-        )  # Shape: (n_timepoints,)
-
-        # Calculate normalized values for control at zero concentration
-        control_zero_normalized = self._get_normalized_replicate_values(
-            control_zero_wells, control_blank, measurement, od_measurement, alpha
-        )  # Shape: (n_replicates, n_timepoints)
-        control_zero_mean = np.mean(
-            control_zero_normalized, axis=0
-        )  # Shape: (n_timepoints,)
+        sample_zero = mean_per_plate(sample_by_conc[0.0], sample_blank)
+        control_zero = mean_per_plate(control_by_conc[0.0], control_blank)
 
         # Build fold change per concentration. Zero concentration is the
         # within-sample reference, so it is not itself a fold change.
@@ -923,34 +980,42 @@ class SampleFrame:
         # is the ordering every other array in the package uses.
         fold_change_by_conc: Dict[float, List[np.ndarray]] = {}
 
-        for conc in sorted(sample_wells_by_conc.keys(), reverse=True):
+        for conc in sorted(sample_by_conc, reverse=True):
             if conc == 0.0:
                 continue
 
-            wells = sample_wells_by_conc[conc]
-            sample_conc_normalized = self._get_normalized_replicate_values(
-                wells, blank, measurement, od_measurement, alpha
-            )  # Shape: (n_replicates, n_timepoints)
+            control_at_conc = (
+                mean_per_plate(control_by_conc[conc], control_blank)
+                if conc in control_by_conc
+                else None
+            )
 
-            # Get control wells at the same concentration (if available)
-            control_wells = control_wells_by_conc.get(conc, [])
-
-            if control_wells:
-                # Control has this concentration:
-                # (Sample_C / Sample_0) / (Control_C / Control_0)
-                control_conc_normalized = self._get_normalized_replicate_values(
-                    control_wells, control_blank, measurement, od_measurement, alpha
+            replicates = []
+            for well in sample_by_conc[conc]:
+                plate = plate_of(well)
+                within_sample = normalized(well, sample_blank) / on_plate(
+                    sample_zero, plate, f"zero-concentration wells of '{sample.name}'"
                 )
-                control_conc_mean = np.mean(control_conc_normalized, axis=0)
-                denominator = control_conc_mean / control_zero_mean
-            else:
-                # Control lacks this concentration: (Sample_C / Sample_0) / Control_0
-                denominator = control_zero_mean
-
-            fold_change_by_conc[conc] = [
-                (normalized_rep / sample_zero_mean) / denominator
-                for normalized_rep in sample_conc_normalized
-            ]
+                control_zero_here = on_plate(
+                    control_zero,
+                    plate,
+                    f"zero-concentration wells of control '{control.name}'",
+                )
+                if control_at_conc is not None:
+                    # (Sample_C / Sample_0) / (Control_C / Control_0)
+                    denominator = (
+                        on_plate(
+                            control_at_conc,
+                            plate,
+                            f"wells of control '{control.name}' at {conc}",
+                        )
+                        / control_zero_here
+                    )
+                else:
+                    # Control lacks this concentration: (Sample_C / Sample_0) / Control_0
+                    denominator = control_zero_here
+                replicates.append(within_sample / denominator)
+            fold_change_by_conc[conc] = replicates
 
         if not fold_change_by_conc:
             return np.empty((n_timepoints, 0, 0)), np.empty(0)
@@ -964,8 +1029,7 @@ class SampleFrame:
         fold_change = np.full((n_timepoints, n_replicates, len(concentrations)), np.nan)
         for conc_idx, conc in enumerate(concentrations):
             for rep_idx, series in enumerate(fold_change_by_conc[conc]):
-                length = min(len(series), n_timepoints)
-                fold_change[:length, rep_idx, conc_idx] = series[:length]
+                fold_change[:, rep_idx, conc_idx] = series
 
         return fold_change, concentrations
 
@@ -1192,86 +1256,6 @@ class SampleFrame:
                 self.samples[sample_id].hill_fit_params = params
 
         return fit_results
-
-    def _get_normalized_replicate_values(
-        self,
-        wells: List["Well"],
-        blank: "Sample",
-        measurement: str,
-        od_measurement: str,
-        alpha: float,
-    ) -> np.ndarray:
-        """
-        Calculate normalized values for a list of wells.
-
-        For each well:
-        1. Subtract blank (if available): blanked_measurement = well_measurement - blank_measurement
-        2. Normalize: blanked_measurement / (alpha + blanked_OD)
-
-        Falls back to raw well data if blank data is not available.
-
-        Returns array of shape (n_wells, n_timepoints).
-        """
-        normalized_values = []
-
-        # Get blank data for this measurement and OD
-        # Use the zero-concentration blank values if available
-        blank_conc_0_idx = 0  # Assume blank only has one concentration (zero)
-
-        # Handle case where blank is None
-        if blank is not None:
-            blank_measurement = blank.get_data(measurement, "time_series")
-            blank_od = blank.get_data(od_measurement, "time_series")
-        else:
-            blank_measurement = None
-            blank_od = None
-
-        # Check if blank data is available
-        has_blank_data = blank_measurement is not None and blank_od is not None
-
-        if has_blank_data:
-            # Reduce the blank to one value per timepoint so it broadcasts
-            # against a well's 1-D series.
-            #
-            # `time_series` arrays are 3-D (timepoints, replicates,
-            # concentrations); only the 2-D case was handled here, so a 3-D
-            # blank fell through unreduced and `well - blank` broadcast to
-            # (T, R, T) instead of subtracting. That produced silently wrong
-            # numbers whenever the result was used, and a pandas "Must pass
-            # 2-d input" error when it reached a DataFrame.
-            def _blank_baseline(arr):
-                if arr.ndim == 3:
-                    return np.nanmean(arr[:, :, blank_conc_0_idx], axis=1)
-                if arr.ndim == 2:
-                    return arr[:, blank_conc_0_idx]
-                return arr
-
-            blank_measurement = _blank_baseline(blank_measurement)
-            blank_od = _blank_baseline(blank_od)
-
-        for well in wells:
-            # Get raw well data
-            well_measurement = well.time_series.get(measurement)
-            well_od = well.time_series.get(od_measurement)
-
-            if well_measurement is None or well_od is None:
-                raise ValueError(
-                    f"Missing measurement or OD data in well {well.well_id}"
-                )
-
-            # Blank subtract if available, otherwise use raw data
-            if has_blank_data:
-                measurement_to_normalize = well_measurement - blank_measurement
-                od_to_normalize = well_od - blank_od
-            else:
-                measurement_to_normalize = well_measurement
-                od_to_normalize = well_od
-
-            # Normalize: measurement / (alpha + OD)
-            normalized = measurement_to_normalize / (alpha + od_to_normalize)
-            normalized_values.append(normalized)
-
-        return np.array(normalized_values)
 
     def plot_fold_change_dose_response(self, timepoint_idx: int, **kwargs):
         """Plot dose-response curve. See :func:`fluoropy.core.plotting.plot_fold_change_dose_response`."""

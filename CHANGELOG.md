@@ -83,6 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Fold change refuses to guess between controls.** When several samples
+  could be the reference — two negative controls, say, or two controls loaded
+  through `Plate(controls=[...])`, which carry no polarity —
+  `calculate_fold_change()` raises and names them. Set
+  `frame['S'].matched_control = 'NC'` to choose. It previously used whichever
+  came first.
+- **Code style is enforced.** black, isort and flake8 run in CI and in a
+  pre-commit hook, at pinned versions. See `CONTRIBUTING.md`.
 - **The library logs instead of printing.** 66 `print()` calls became
   `logger.info` (progress) and `logger.warning` (problems), so importing data no
   longer writes to stdout. Nothing is emitted unless you ask:
@@ -137,6 +145,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Blank subtraction crashed on any plate with inducers or antibiotics.**
+  Matching keys called `tuple()` on each condition value, but wells store them
+  as plain floats — exactly what the layout loaders and
+  `set_sample_info(inducers=...)` produce — so
+  `calculate_blank_subtracted_timeseries()` and `calculate_fold_change()`
+  raised `TypeError: 'float' object is not iterable`.
+- **Per-plate matching used only a sample's first plate.** With
+  `pool_controls=False` (the default), a sample spanning plates had every
+  replicate blanked against, and compared with, references from the plate of
+  its first well. Each replicate now uses its own plate's blank, zero-dose
+  wells and control wells. A plate with no blank is reported and the sample
+  skipped, rather than blanked against another plate.
+- **`calculate_fold_change()` could take a positive control as the
+  reference**, and ignored `matched_control`. It took the first sample with
+  `is_control` set. It now uses `matched_control` when set, otherwise the one
+  negative control (or the one control of unspecified polarity), and raises if
+  several qualify. `keep_controls_separate` no longer matches a positive
+  control either.
 - **Well IDs past row Z were malformed.** Identifiers were built with
   `chr(ord('A') + row)` in thirteen places, which runs off the end of the
   alphabet: a 1536-well plate has 32 rows, so 288 of its wells were named
