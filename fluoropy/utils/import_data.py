@@ -7,11 +7,16 @@ Gen5 txt output format.
 
 import numpy as np
 
-def import_results(data_file:str, run_time:float, sampling_rate:float,
-                   n_rows:int = 8,
-                   n_cols:list or int = 12,
-                   read_labels = ["Read 1:600", "Read 2:480,510"])->dict:
-    '''
+
+def import_results(
+    data_file: str,
+    run_time: float,
+    sampling_rate: float,
+    n_rows: int = 8,
+    n_cols: list or int = 12,
+    read_labels=["Read 1:600", "Read 2:480,510"],
+) -> dict:
+    """
     Creates a 3D array where the first dimension is represents the plate rows,
     the second represents the plate columns, and the third contains the timeseries data.
     This is meant to be used with txt files exported for Biotek's Gen5 software
@@ -34,8 +39,8 @@ def import_results(data_file:str, run_time:float, sampling_rate:float,
         timepoints in hours.
         -meta_data(dict): Keys are the metadata titles and values are the
         information.
-    '''
-    
+    """
+
     file_read = open(data_file, encoding="iso-8859-1")
 
     data = {}
@@ -45,10 +50,10 @@ def import_results(data_file:str, run_time:float, sampling_rate:float,
     # Check read files and preemptiely strip whitespace
     if type(read_labels) is not list:
         read_labels = [read_labels]
-    else :
+    else:
         read_labels = [label.strip() for label in read_labels]
 
-    n_timepoints = int(run_time/sampling_rate)
+    n_timepoints = int(run_time / sampling_rate)
 
     if type(n_cols) is list:
         n_cols = max(n_cols)
@@ -63,11 +68,16 @@ def import_results(data_file:str, run_time:float, sampling_rate:float,
             metadata_flag = None
 
             data[read_flag] = np.zeros((n_rows, n_cols, n_timepoints))
-            time[read_flag] = np.zeros((n_timepoints,1))
+            time[read_flag] = np.zeros((n_timepoints, 1))
 
             time_i = 0
 
-        elif len(read_line) > 1 and read_flag is not None and metadata_flag is None and not read_line[0].startswith("Time"):
+        elif (
+            len(read_line) > 1
+            and read_flag is not None
+            and metadata_flag is None
+            and not read_line[0].startswith("Time")
+        ):
             element_index = 0
             row = 0
             col = 0
@@ -75,14 +85,26 @@ def import_results(data_file:str, run_time:float, sampling_rate:float,
                 time[read_flag][time_i, 0] = _time_str_to_hours(read_line[0])
 
             for j, element in enumerate(read_line):
-                if j > 1 and element == "OVRFLW" and row < n_rows and col < n_cols and time_i < n_timepoints:
+                if (
+                    j > 1
+                    and element == "OVRFLW"
+                    and row < n_rows
+                    and col < n_cols
+                    and time_i < n_timepoints
+                ):
                     data[read_flag][row, col, time_i] = np.nan
                     element_index += 1
                     col += 1
                     if element_index % (n_cols) == 0:
                         col = 0
                         row += 1
-                elif j > 1 and element != "#N/A" and row < n_rows and col < n_cols and time_i < n_timepoints:
+                elif (
+                    j > 1
+                    and element != "#N/A"
+                    and row < n_rows
+                    and col < n_cols
+                    and time_i < n_timepoints
+                ):
                     data[read_flag][row, col, time_i] = float(element)
                     element_index += 1
                     col += 1
@@ -91,17 +113,18 @@ def import_results(data_file:str, run_time:float, sampling_rate:float,
                         row += 1
             time_i += 1
 
-        elif "Procedure Summary" in read_line and read_flag == None:
+        elif "Procedure Summary" in read_line and read_flag is None:
             metadata_flag = read_line[0]
             read_flag = None
 
         elif len(read_line) > 1 and read_flag is None and metadata_flag is not None:
             meta_data[read_line[0]] = read_line[1:]
 
-        elif read_line == ['']:
+        elif read_line == [""]:
             continue
 
-    return(data, time, meta_data)
+    return (data, time, meta_data)
+
 
 def _time_str_to_hours(time_str):
     """Convert a time string 'hh:mm:ss' to a float representing hours."""

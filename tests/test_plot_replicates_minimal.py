@@ -3,14 +3,10 @@ Simple test script for plotting replicate time series curves in SampleFrame.
 Uses a minimal example without requiring interactive matplotlib display.
 """
 
-
+import matplotlib.pyplot as plt  # conftest.py forces the Agg backend
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
+
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
-from fluoropy.core.sample import Sample
 from fluoropy.core.sampleframe import SampleFrame
 
 
@@ -28,7 +24,13 @@ def create_small_synthetic_plate() -> Plate:
         ("s15", [0.1, 1.0], 0, 3, 3),
     ]
 
-    for sample_name, concentrations, row_start, col_start, n_replicates in sample_configs:
+    for (
+        sample_name,
+        concentrations,
+        row_start,
+        col_start,
+        n_replicates,
+    ) in sample_configs:
         for conc_idx, conc in enumerate(concentrations):
             for rep in range(n_replicates):
                 row = row_start + conc_idx
@@ -36,14 +38,14 @@ def create_small_synthetic_plate() -> Plate:
                 well = plate.get_well_by_position(row, col)
 
                 well.set_sample_info(
-                    sample_type=sample_name,
-                    concentration=conc,
-                    medium="LB"
+                    sample_type=sample_name, concentration=conc, medium="LB"
                 )
 
                 # Simple synthetic growth curve with random variation per replicate
                 od_max = 0.6 + 0.1 * np.log10(conc + 1)
-                od_data = 0.05 + (od_max - 0.05) / (1 + np.exp(-0.4 * (time_points - 12)))
+                od_data = 0.05 + (od_max - 0.05) / (
+                    1 + np.exp(-0.4 * (time_points - 12))
+                )
                 od_data += np.random.normal(0, 0.02, n_timepoints)
                 od_data = np.maximum(od_data, 0.05)
 
@@ -61,9 +63,9 @@ def create_small_synthetic_plate() -> Plate:
 
 def test_basic_functionality(tmp_path):
     """Test basic plotting functionality."""
-    print("="*60)
+    print("=" * 60)
     print("TEST: Basic Replicate Time Series Plotting")
-    print("="*60)
+    print("=" * 60)
 
     np.random.seed(42)
 
@@ -80,7 +82,7 @@ def test_basic_functionality(tmp_path):
 
     # Check data structure
     print("\n3. Checking data structure...")
-    for sample_id in ['s14', 's15']:
+    for sample_id in ["s14", "s15"]:
         sample = frame[sample_id]
         conc_groups = {}
         for well in sample.wells:
@@ -96,17 +98,14 @@ def test_basic_functionality(tmp_path):
     print("\n4. Testing plot_replicate_time_series method...")
     try:
         fig, axes = frame.plot_replicate_time_series(
-            'OD600',
-            sample_ids=['s14', 's15'],
-            show_mean=True,
-            ylabel="OD600"
+            "OD600", sample_ids=["s14", "s15"], show_mean=True, ylabel="OD600"
         )
         print("   ✓ Plotting successful")
         print(f"   ✓ Figure created with shape: {fig.get_size_inches()}")
         print(f"   ✓ Number of subplots: {len(axes)}")
 
         # Show subplot layout
-        print(f"   Subplots:")
+        print("   Subplots:")
         for key in sorted(axes.keys()):
             print(f"     - {key}")
 
@@ -121,15 +120,15 @@ def test_basic_functionality(tmp_path):
     except Exception as e:
         print(f"   ✗ Error: {e}")
         import traceback
-        traceback.print_exc()
 
+        traceback.print_exc()
 
 
 def test_error_handling():
     """Test error handling."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST: Error Handling")
-    print("="*60)
+    print("=" * 60)
 
     plate = create_small_synthetic_plate()
     frame = SampleFrame(plate)
@@ -137,7 +136,7 @@ def test_error_handling():
     # Test 1: Invalid measurement
     print("\n1. Testing error with invalid measurement...")
     try:
-        frame.plot_replicate_time_series('InvalidMeas', sample_ids=['s14'])
+        frame.plot_replicate_time_series("InvalidMeas", sample_ids=["s14"])
         print("   ✗ Should have raised ValueError")
     except ValueError as e:
         print(f"   ✓ Correctly caught: {str(e)[:50]}...")
@@ -145,7 +144,7 @@ def test_error_handling():
     # Test 2: Invalid sample ID
     print("\n2. Testing error with invalid sample ID...")
     try:
-        frame.plot_replicate_time_series('OD600', sample_ids=['nonexistent'])
+        frame.plot_replicate_time_series("OD600", sample_ids=["nonexistent"])
         print("   ✗ Should have raised ValueError")
     except ValueError as e:
         print(f"   ✓ Correctly caught: {str(e)[:50]}...")
@@ -153,7 +152,7 @@ def test_error_handling():
     # Test 3: Empty sample list
     print("\n3. Testing error with empty sample list...")
     try:
-        frame.plot_replicate_time_series('OD600', sample_ids=[])
+        frame.plot_replicate_time_series("OD600", sample_ids=[])
         print("   ✗ Should have raised ValueError")
     except ValueError as e:
         print(f"   ✓ Correctly caught: {str(e)[:50]}...")
@@ -162,18 +161,18 @@ def test_error_handling():
 
 
 def main():
-    print("\n" + "#"*60)
+    print("\n" + "#" * 60)
     print("# Replicate Time Series Plotting - Test Suite")
-    print("#"*60)
+    print("#" * 60)
 
     success = True
     success = test_basic_functionality() and success
     success = test_error_handling() and success
 
     if success:
-        print("\n" + "#"*60)
+        print("\n" + "#" * 60)
         print("# ✓ ALL TESTS PASSED!")
-        print("#"*60)
+        print("#" * 60)
         print("\nKey features implemented:")
         print("  • plot_replicate_time_series() method added to SampleFrame")
         print("  • One subplot per sample-concentration combination")

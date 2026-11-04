@@ -48,6 +48,7 @@ def plate():
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def test_wells_with_role_finds_them_in_order(plate):
     assert wells_with_role(plate, "negative_control") == ["A1", "A2", "A3"]
     assert wells_with_role(plate, "positive_control") == ["B1", "B2", "B3"]
@@ -55,7 +56,9 @@ def test_wells_with_role_finds_them_in_order(plate):
 
 def test_wells_with_role_accepts_aliases(plate):
     assert wells_with_role(plate, "nc") == wells_with_role(plate, "negative_control")
-    assert wells_with_role(plate, "max_effect") == wells_with_role(plate, "positive_control")
+    assert wells_with_role(plate, "max_effect") == wells_with_role(
+        plate, "positive_control"
+    )
 
 
 def test_wells_with_role_skips_excluded(plate):
@@ -79,11 +82,10 @@ def test_resolve_controls_explains_both_fixes(plate):
 # the analysis functions
 # ---------------------------------------------------------------------------
 
+
 def test_z_factor_finds_its_controls(plate):
     from_roles = calculate_z_factor(plate, "GFP")
-    explicit = calculate_z_factor(
-        plate, "GFP", ["B1", "B2", "B3"], ["A1", "A2", "A3"]
-    )
+    explicit = calculate_z_factor(plate, "GFP", ["B1", "B2", "B3"], ["A1", "A2", "A3"])
 
     assert from_roles == pytest.approx(explicit)
     # 1 - 3(10 + 10) / |110 - 20| = 1/3
@@ -92,9 +94,7 @@ def test_z_factor_finds_its_controls(plate):
 
 def test_signal_to_noise_defaults_background_to_blanks(plate):
     from_roles = calculate_signal_to_noise(plate, "GFP", ["B1", "B2", "B3"])
-    explicit = calculate_signal_to_noise(
-        plate, "GFP", ["B1", "B2", "B3"], ["C1", "C2"]
-    )
+    explicit = calculate_signal_to_noise(plate, "GFP", ["B1", "B2", "B3"], ["C1", "C2"])
 
     assert from_roles == pytest.approx(explicit)
 
@@ -144,9 +144,9 @@ def test_direction_does_not_matter_for_role_lookup():
     """
     p = Plate(plate_format="96", name="repressor")
     for wid, v in zip(("A1", "A2", "A3"), (100.0, 110.0, 120.0)):
-        _set(p, wid, v, role="negative_control")   # no effect, high signal
+        _set(p, wid, v, role="negative_control")  # no effect, high signal
     for wid, v in zip(("B1", "B2", "B3"), (10.0, 20.0, 30.0)):
-        _set(p, wid, v, role="positive_control")   # max effect, low signal
+        _set(p, wid, v, role="positive_control")  # max effect, low signal
 
     assert calculate_z_factor(p, "GFP") == pytest.approx(1 / 3)
 
@@ -154,6 +154,7 @@ def test_direction_does_not_matter_for_role_lookup():
 # ---------------------------------------------------------------------------
 # strain_modifications
 # ---------------------------------------------------------------------------
+
 
 def test_strain_modifications_defaults_to_empty_list():
     p = Plate(plate_format="96", name="strain")
@@ -186,8 +187,9 @@ def test_strain_modifications_reach_the_sample():
 
     p = Plate(plate_format="96", name="strain")
     well = p["A1"]
-    well.set_sample_info("NC", role="negative_control",
-                         strain_modifications=["non-targeting"])
+    well.set_sample_info(
+        "NC", role="negative_control", strain_modifications=["non-targeting"]
+    )
     well.concentration = 0.0
     well.add_time_series("GFP", np.array([1.0, 2.0, 3.0]), TIMES)
 

@@ -11,6 +11,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: lint (black, isort, flake8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # Pinned to match .pre-commit-config.yaml, so a new formatter release
+      # cannot turn CI red on an unchanged tree.
+      - name: Install linters
+        run: python -m pip install black==26.5.1 isort==9.0.2 flake8==7.4.1
+
+      - name: black
+        run: black --check --diff fluoropy tests
+
+      - name: isort
+        run: isort --check-only --diff fluoropy tests
+
+      - name: flake8
+        run: flake8 fluoropy tests
+
   test:
     name: pytest (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

@@ -32,9 +32,19 @@ def make_well():
     ...               series={"OD600": [0.1, 0.2, 0.3]})
     """
 
-    def _make(well_id, row, column, sample_type=None, concentration=None,
-              series=None, time_points=None, is_blank=False, is_control=False,
-              plate_id=None, medium=None):
+    def _make(
+        well_id,
+        row,
+        column,
+        sample_type=None,
+        concentration=None,
+        series=None,
+        time_points=None,
+        is_blank=False,
+        is_control=False,
+        plate_id=None,
+        medium=None,
+    ):
         well = Well(well_id, row, column)
         well.sample_type = sample_type
         well.concentration = concentration

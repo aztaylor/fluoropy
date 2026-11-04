@@ -11,15 +11,24 @@ import pytest
 from fluoropy.core.plate import Plate
 from fluoropy.core.well import parse_well_id, row_index, row_label, well_id
 
-
 # ---------------------------------------------------------------------------
 # row labels
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("row,label", [
-    (0, "A"), (1, "B"), (25, "Z"),
-    (26, "AA"), (27, "AB"), (31, "AF"), (51, "AZ"), (52, "BA"),
-])
+
+@pytest.mark.parametrize(
+    "row,label",
+    [
+        (0, "A"),
+        (1, "B"),
+        (25, "Z"),
+        (26, "AA"),
+        (27, "AB"),
+        (31, "AF"),
+        (51, "AZ"),
+        (52, "BA"),
+    ],
+)
 def test_row_label(row, label):
     assert row_label(row) == label
 
@@ -47,10 +56,18 @@ def test_row_index_rejects_non_letters():
 # well ids
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("row,column,identifier", [
-    (0, 0, "A1"), (0, 11, "A12"), (7, 11, "H12"),
-    (15, 23, "P24"), (26, 0, "AA1"), (31, 47, "AF48"),
-])
+
+@pytest.mark.parametrize(
+    "row,column,identifier",
+    [
+        (0, 0, "A1"),
+        (0, 11, "A12"),
+        (7, 11, "H12"),
+        (15, 23, "P24"),
+        (26, 0, "AA1"),
+        (31, 47, "AF48"),
+    ],
+)
 def test_well_id_and_parse_round_trip(row, column, identifier):
     assert well_id(row, column) == identifier
     assert parse_well_id(identifier) == (row, column)
@@ -75,11 +92,15 @@ def test_parse_well_id_rejects_zero_column():
 # plates
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("plate_format,n_wells,rows,cols", [
-    ("96", 96, 8, 12),
-    ("384", 384, 16, 24),
-    ("1536", 1536, 32, 48),
-])
+
+@pytest.mark.parametrize(
+    "plate_format,n_wells,rows,cols",
+    [
+        ("96", 96, 8, 12),
+        ("384", 384, 16, 24),
+        ("1536", 1536, 32, 48),
+    ],
+)
 def test_every_plate_format_has_valid_ids(plate_format, n_wells, rows, cols):
     plate = Plate(plate_format=plate_format, name="p")
 

@@ -10,13 +10,16 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..core.well import ROLE_NEGATIVE_CONTROL, ROLE_POSITIVE_CONTROL
-from ._extract import all_well_values, resolve_controls, well_values
+from ._extract import resolve_controls, well_values
 
 
-def calculate_z_factor(plate, measurement: str,
-                       positive_controls: Optional[List[str]] = None,
-                       negative_controls: Optional[List[str]] = None,
-                       timepoint_idx: int = -1) -> float:
+def calculate_z_factor(
+    plate,
+    measurement: str,
+    positive_controls: Optional[List[str]] = None,
+    negative_controls: Optional[List[str]] = None,
+    timepoint_idx: int = -1,
+) -> float:
     """
     Z'-factor for assay quality (Zhang, Chung & Oldenburg 1999).
 
@@ -73,10 +76,13 @@ def calculate_z_factor(plate, measurement: str,
     return float(1 - 3 * (pos.std(ddof=1) + neg.std(ddof=1)) / separation)
 
 
-def calculate_signal_to_noise(plate, measurement: str,
-                              signal_wells: List[str],
-                              background_wells: Optional[List[str]] = None,
-                              timepoint_idx: int = -1) -> float:
+def calculate_signal_to_noise(
+    plate,
+    measurement: str,
+    signal_wells: List[str],
+    background_wells: Optional[List[str]] = None,
+    timepoint_idx: int = -1,
+) -> float:
     """
     Signal-to-noise ratio: ``(mean_signal - mean_background) / std_background``.
 
@@ -125,8 +131,9 @@ def calculate_signal_to_noise(plate, measurement: str,
     return float(difference / bg_std)
 
 
-def check_edge_effects(plate, measurement: str, timepoint_idx: int = -1,
-                       threshold_percent: float = 10.0) -> Dict[str, object]:
+def check_edge_effects(
+    plate, measurement: str, timepoint_idx: int = -1, threshold_percent: float = 10.0
+) -> Dict[str, object]:
     """
     Compare wells on the plate perimeter against interior wells.
 

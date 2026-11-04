@@ -77,6 +77,24 @@ module docstring.
 role means adding it to `VALID_ROLES` in `core/well.py`. "Negative" and
 "positive" mean no-effect and maximal-effect, never low and high signal.
 
+**One plate per replicate, not per sample.** A sample merged across plates
+has wells on several, so `sample.plate_id` (the first well's plate) is not
+"the" plate. Anything that compares a replicate with a reference — blank,
+zero-dose wells, control — looks up the reference on that replicate's own
+plate, via `sample.replicate_wells[measurement][c][r]` (the well behind each
+array slot) or `sample.plate_ids`. `pool_controls=True` is the explicit opt-out.
+
+**Build samples with `Sample(name, wells)`.** Never assemble one with
+`object.__new__`: the constructor is what keeps the wells, the arrays, the
+concentration axis and the role consistent. To transform a sample, transform
+copies of its wells and construct a new one, as `align_replicates_by_od` does.
+
+**Fold change** is `Sample_C / Sample_0`, divided by `Control_C / Control_0`
+only where the control was run at that dose — always a dimensionless ratio. The
+reference control comes from `SampleFrame._reference_control`: `matched_control`,
+else the one negative control, never a positive one, and an error rather than a
+guess when several qualify.
+
 **Well IDs.** Build with `well_id(row, col)` and take apart with
 `parse_well_id(id)`. Do not use `chr(ord('A') + row)` — 1536-well plates have 32
 rows and that runs off the end of the alphabet.
@@ -103,7 +121,13 @@ pytest -m integration           # needs a local Gen5 export (skipped otherwise)
 ```
 
 CI runs the suite on Python 3.9, 3.11 and 3.13, plus a job asserting the package
-imports without the optional `viz` extra. `main` requires all four to pass.
+imports without the optional `viz` extra, and a lint job (black, isort,
+flake8 at the versions pinned in `.pre-commit-config.yaml`).
+
+`tests/test_pipeline_regressions.py` holds one or more tests per pipeline bug
+fixed, each on a small synthetic plate whose correct answer can be worked out
+by hand. Build fixtures from real wells on a `Plate`, as those do, rather than
+hand-assembling `Sample` objects.
 
 Known-but-unfixed behaviour is pinned with `@pytest.mark.xfail(strict=True)`, so
 it fails loudly when fixed and the mark can be removed.

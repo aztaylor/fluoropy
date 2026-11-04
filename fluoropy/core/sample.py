@@ -30,8 +30,10 @@ reference rather than a fold change of their own. It is therefore labelled by
 """
 
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Any, Callable, Dict, List, Optional
+
 import numpy as np
+
 from .well import (
     CONTROL_ROLES,
     ROLE_BLANK,
@@ -44,6 +46,38 @@ from .well import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _freeze_conditions(conditions: Optional[Dict[str, Any]]) -> frozenset:
+    """
+    Hashable form of an antibiotics / inducers / modifications dict.
+
+    Wells store these values as plain numbers (``{'aTc': 100.0}``), and
+    callers sometimes pass arrays. Both are reduced to a tuple of floats, so
+    ``100.0`` and ``np.array([100.0])`` give the same key. This used to call
+    ``tuple(value)`` directly, which raised ``TypeError`` on the float that
+    every plate loader actually stores -- so blank subtraction crashed for any
+    plate with an inducer or antibiotic layout.
+    """
+    return frozenset(
+        (name, tuple(float(x) for x in np.ravel(value)))
+        for name, value in (conditions or {}).items()
+    )
+
+
+def _fit_length(trace, n_timepoints: int) -> np.ndarray:
+    """
+    A 1-D float trace cut, or NaN-padded, to exactly ``n_timepoints``.
+
+    Replicates on different plates can have different run lengths. Padding
+    with NaN keeps a short trace from broadcasting, or from being silently
+    stretched, against a longer one.
+    """
+    trace = np.asarray(trace, dtype=float).ravel()
+    fitted = np.full(n_timepoints, np.nan)
+    length = min(len(trace), n_timepoints)
+    fitted[:length] = trace[:length]
+    return fitted
 
 
 class Sample:
@@ -105,7 +139,8 @@ class Sample:
         Shape: (n_timepoints, n_concentrations)
 
     normalized_data_error : Dict[str, np.ndarray]
-        Error (std/sem) for normalized data across replicates for each measurement type (requires calculate_normalized_data)
+        Error (std/sem) for normalized data across replicates for each measurement
+        type (requires calculate_normalized_data)
         Shape: (n_timepoints, n_concentrations)
 
     """
@@ -123,25 +158,35 @@ class Sample:
         """
         self.name = name
         self.wells = wells or []
-        self.plate_id = None  # Plate identifier if needed
+        # The *first* well's plate. A sample merged across plates has
+        # several; use plate_ids for all of them.
+        self.plate_id = None
 
         # Core data structures - raw individual replicate data
-        self.time_series: Dict[str, np.ndarray] = {}  # Raw data {measurement_type: np.ndarray(n_timepoints, n_replicates, n_concentrations)}
-        self.time: Optional[np.ndarray] = None        # Time points
-        self.concentrations: Optional[Dict[str, np.ndarray]] = None  # Concentration values of the molecule of interest
+        self.time_series: Dict[str, np.ndarray] = (
+            {}
+        )  # Raw data {measurement_type: np.ndarray(n_timepoints, n_replicates, n_concentrations)}
+        self.time: Optional[np.ndarray] = None  # Time points
+        self.concentrations: Optional[Dict[str, np.ndarray]] = (
+            None  # Concentration values of the molecule of interest
+        )
 
         # Statistics derived from time_series
         self.time_series_mean: Dict[str, np.ndarray] = {}  # Mean across replicates
-        self.time_series_error: Dict[str, np.ndarray] = {}  # Error (std/sem) across replicates
+        self.time_series_error: Dict[str, np.ndarray] = (
+            {}
+        )  # Error (std/sem) across replicates
 
         # Processed data structures
-        self.blanked_data: Dict[str, np.ndarray] = {}        # Blank-subtracted raw data
-        self.blanked_data_mean: Dict[str, np.ndarray] = {}   # Mean blanked data
+        self.blanked_data: Dict[str, np.ndarray] = {}  # Blank-subtracted raw data
+        self.blanked_data_mean: Dict[str, np.ndarray] = {}  # Mean blanked data
         self.blanked_data_error: Dict[str, np.ndarray] = {}  # Error for blanked data
 
-        self.normalized_data: Dict[str, np.ndarray] = {}   # Normalized raw data
+        self.normalized_data: Dict[str, np.ndarray] = {}  # Normalized raw data
         self.normalized_data_mean: Dict[str, np.ndarray] = {}  # Mean normalized data
-        self.normalized_data_error: Dict[str, np.ndarray] = {}  # Error for normalized data
+        self.normalized_data_error: Dict[str, np.ndarray] = (
+            {}
+        )  # Error for normalized data
 
         # Fold change vs the matched control. Same layout as the dicts above:
         # keyed by measurement, (n_timepoints, n_replicates, n_concentrations).
@@ -154,21 +199,30 @@ class Sample:
         self.fold_change_concentrations: Optional[np.ndarray] = None
 
         # Metadata
-        self.n_replicates: Dict[str, int] = {}        # Number of replicates per concentration
+        self.n_replicates: Dict[str, int] = {}  # Number of replicates per concentration
         self.metadata: Dict[str, Any] = {}
 
         # Sample properties (taken from first well)
         self.medium: Optional[str] = None
-        self.antibiotics: Optional[Dict[str, np.ndarray]] = None
-        self.inducers: Optional[Dict[str, np.ndarray]] = None  # e.g., {'IPTG': np.array([1.0, 2.0, 3.0])}
-        self.other_modifications: Optional[Dict[str, np.ndarray]] = None
+        self.antibiotics: Optional[Dict[str, float]] = None
+        # Taken from the first well, like the other condition dicts, e.g.
+        # {'aTc': 100.0}. See _freeze_conditions for how they are matched.
+        self.inducers: Optional[Dict[str, float]] = None
+        self.other_modifications: Optional[Dict[str, float]] = None
         # Non-chemical construct/strain properties, taken from the wells. See
         # Well.strain_modifications.
         self.strain_modifications: List[str] = []
         # Role is stored once; is_blank / is_control / is_nc / is_pc derive
         # from it, matching Well.
         self._role: str = ROLE_SAMPLE
-        self.matched_control: Optional[str] = None  # ID of matched control Sample (when keep_controls_separate=True)
+        self.matched_control: Optional[str] = (
+            None  # Fold-change reference: set by keep_controls_separate, or by hand
+        )
+        # Which well fills each (replicate, concentration) slot of
+        # time_series, per measurement: replicate_wells[m][c][r]. Lets a
+        # caller treat each replicate by its own well -- its plate, say --
+        # rather than assuming the whole sample shares one.
+        self.replicate_wells: Dict[str, List[List[Well]]] = {}
 
         # Initialize from wells if provided
         if wells:
@@ -182,7 +236,11 @@ class Sample:
         n_wells = len(self.wells)
         n_measurements = len(self.time_series)
         time_info = f", {len(self.time)}tp" if self.time is not None else ""
-        conc_info = f", {len(self.concentrations)}conc" if self.concentrations is not None else ""
+        conc_info = (
+            f", {len(self.concentrations)}conc"
+            if self.concentrations is not None
+            else ""
+        )
         return f"Sample({self.name}, {n_wells}wells, {n_measurements}meas{time_info}{conc_info})"
 
     # ======================================================================
@@ -191,6 +249,20 @@ class Sample:
     # `name` is the identifier, and it always equals the key this sample is
     # stored under in its SampleFrame. The aliases exist because wells call the
     # same concept sample_name / sample_type.
+
+    @property
+    def plate_ids(self) -> List[Optional[str]]:
+        """
+        Every plate this sample has (non-excluded) wells on, in well order.
+
+        Prefer this to :attr:`plate_id`, which is only the *first* well's
+        plate. A sample merged across plates has several.
+        """
+        seen: Dict[Optional[str], None] = {}
+        for well in self.wells:
+            if not well.is_excluded():
+                seen.setdefault(well.plate_id, None)
+        return list(seen)
 
     @property
     def sample_name(self) -> str:
@@ -228,8 +300,9 @@ class Sample:
     def role(self, value: Optional[str]) -> None:
         self._role = canonical_role(value)
 
-    def _set_role_flag(self, flag: bool, role_when_true: str,
-                       roles_cleared: frozenset) -> None:
+    def _set_role_flag(
+        self, flag: bool, role_when_true: str, roles_cleared: frozenset
+    ) -> None:
         if flag:
             self._role = role_when_true
         elif self.role in roles_cleared:
@@ -259,8 +332,9 @@ class Sample:
 
     @is_negative_control.setter
     def is_negative_control(self, value: bool) -> None:
-        self._set_role_flag(bool(value), ROLE_NEGATIVE_CONTROL,
-                            frozenset({ROLE_NEGATIVE_CONTROL}))
+        self._set_role_flag(
+            bool(value), ROLE_NEGATIVE_CONTROL, frozenset({ROLE_NEGATIVE_CONTROL})
+        )
 
     @property
     def is_positive_control(self) -> bool:
@@ -268,8 +342,9 @@ class Sample:
 
     @is_positive_control.setter
     def is_positive_control(self, value: bool) -> None:
-        self._set_role_flag(bool(value), ROLE_POSITIVE_CONTROL,
-                            frozenset({ROLE_POSITIVE_CONTROL}))
+        self._set_role_flag(
+            bool(value), ROLE_POSITIVE_CONTROL, frozenset({ROLE_POSITIVE_CONTROL})
+        )
 
     @property
     def is_nc(self) -> bool:
@@ -296,23 +371,24 @@ class Sample:
         """
         return (
             self.medium,
-            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            _freeze_conditions(self.antibiotics),
             self.plate_id,
-            frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items()),
-            frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
+            _freeze_conditions(self.inducers),
+            _freeze_conditions(self.other_modifications),
         )
 
     def condition_key_no_inducers(self) -> tuple:
         """Return condition key without inducer info, for match_inducers=False."""
         return (
             self.medium,
-            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items()),
+            _freeze_conditions(self.antibiotics),
             self.plate_id,
-            frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
+            _freeze_conditions(self.other_modifications),
         )
 
-    def get_matching_key(self, pool_across_plates: bool = False,
-                         match_inducers: bool = True) -> tuple:
+    def get_matching_key(
+        self, pool_across_plates: bool = False, match_inducers: bool = True
+    ) -> tuple:
         """
         Get condition key for blank/control matching with flexible pooling.
 
@@ -349,7 +425,7 @@ class Sample:
         # Start with medium and antibiotics (always included)
         key_parts = [
             self.medium,
-            frozenset((k, tuple(v)) for k, v in (self.antibiotics or {}).items())
+            _freeze_conditions(self.antibiotics),
         ]
 
         # Conditionally include plate_id for per-plate matching
@@ -358,14 +434,10 @@ class Sample:
 
         # Conditionally include inducers
         if match_inducers:
-            key_parts.append(
-                frozenset((k, tuple(v)) for k, v in (self.inducers or {}).items())
-            )
+            key_parts.append(_freeze_conditions(self.inducers))
 
         # Always include other_modifications
-        key_parts.append(
-            frozenset((k, tuple(v)) for k, v in (self.other_modifications or {}).items())
-        )
+        key_parts.append(_freeze_conditions(self.other_modifications))
 
         return tuple(key_parts)
 
@@ -380,9 +452,15 @@ class Sample:
             return
         first_well = active_wells[0]
         self.medium = first_well.medium
-        self.antibiotics = dict(first_well.antibiotics) if first_well.antibiotics else {}
+        self.antibiotics = (
+            dict(first_well.antibiotics) if first_well.antibiotics else {}
+        )
         self.inducers = dict(first_well.inducers) if first_well.inducers else {}
-        self.other_modifications = dict(first_well.other_modifications) if first_well.other_modifications else {}
+        self.other_modifications = (
+            dict(first_well.other_modifications)
+            if first_well.other_modifications
+            else {}
+        )
         self.strain_modifications = list(first_well.strain_modifications or [])
         self.role = first_well.role
         self.plate_id = first_well.plate_id
@@ -402,11 +480,18 @@ class Sample:
                     best_time = well.time_points
         if best_time is not None:
             # Trim trailing zeros
-            last = np.max(np.nonzero(best_time)) + 1 if np.any(best_time != 0) else len(best_time)
+            last = (
+                np.max(np.nonzero(best_time)) + 1
+                if np.any(best_time != 0)
+                else len(best_time)
+            )
             self.time = best_time[:last].copy()
 
-    def _populate_time_series(self, measurement_types: Optional[List[str]] = None,
-                              concentrations: Optional[np.ndarray] = None):
+    def _populate_time_series(
+        self,
+        measurement_types: Optional[List[str]] = None,
+        concentrations: Optional[np.ndarray] = None,
+    ):
         """
         Populate time_series with raw individual replicate data organized by concentration.
 
@@ -435,6 +520,7 @@ class Sample:
 
         # Clear existing data
         self.time_series.clear()
+        self.replicate_wells = {}
 
         for measurement_type in measurement_types:
             # Group wells by concentration
@@ -450,7 +536,7 @@ class Sample:
                 conc = well.concentration if well.concentration is not None else 0.0
                 if conc not in concentration_groups:
                     concentration_groups[conc] = []
-                concentration_groups[conc].append(measurement_data)
+                concentration_groups[conc].append((well, measurement_data))
 
             # Build array for this measurement type if we have data
             if not concentration_groups:
@@ -463,7 +549,7 @@ class Sample:
             else:
                 n_timepoints = 0
                 for data_list in concentration_groups.values():
-                    for data in data_list:
+                    for _, data in data_list:
                         n_timepoints = max(n_timepoints, len(data))
 
             if n_timepoints == 0:
@@ -488,16 +574,25 @@ class Sample:
                 continue
 
             # Build 3D array: (n_timepoints, n_replicates, n_concentrations)
-            time_series_array = np.full((n_timepoints, max_replicates, n_concentrations), np.nan)
+            time_series_array = np.full(
+                (n_timepoints, max_replicates, n_concentrations), np.nan
+            )
 
             # Populate array. A concentration with no wells keeps its NaN
             # column, holding the position so column i stays axis[i].
             for conc_idx, concentration in enumerate(axis):
-                for rep_idx, data in enumerate(concentration_groups.get(concentration, ())):
+                for rep_idx, (_, data) in enumerate(
+                    concentration_groups.get(concentration, ())
+                ):
                     actual_len = min(len(data), n_timepoints)
-                    time_series_array[:actual_len, rep_idx, conc_idx] = data[:actual_len]
+                    time_series_array[:actual_len, rep_idx, conc_idx] = data[
+                        :actual_len
+                    ]
 
             self.time_series[measurement_type] = time_series_array
+            self.replicate_wells[measurement_type] = [
+                [well for well, _ in concentration_groups.get(c, ())] for c in axis
+            ]
 
     def add_well(self, well: Well):
         """
@@ -515,7 +610,7 @@ class Sample:
         if len(self.wells) == 1:
             self._initialize_from_wells()
 
-    def get_concentrations(self, order: str = 'value') -> np.ndarray:
+    def get_concentrations(self, order: str = "value") -> np.ndarray:
         """
         Get unique concentrations from all wells in this sample.
 
@@ -540,16 +635,18 @@ class Sample:
 
         # CRITICAL: If time series data exists, always return the canonical order
         # that matches the time series columns to maintain data integrity
-        if (hasattr(self, '_timeseries_concentration_order') and
-            self._timeseries_concentration_order is not None and
-            hasattr(self, 'time_series') and
-            self.time_series):
+        if (
+            hasattr(self, "_timeseries_concentration_order")
+            and self._timeseries_concentration_order is not None
+            and hasattr(self, "time_series")
+            and self.time_series
+        ):
             return self._timeseries_concentration_order.copy()
 
         # If no time series data, delegate to the custom order method
         return self.get_concentrations_custom_order(order=order)
 
-    def get_concentrations_custom_order(self, order: str = 'position') -> np.ndarray:
+    def get_concentrations_custom_order(self, order: str = "position") -> np.ndarray:
         """
         Get unique concentrations in a specific order, ignoring time series data order.
         Use this method when you explicitly want a different ordering than the time series.
@@ -570,7 +667,7 @@ class Sample:
         np.ndarray
             Array of unique concentrations in the requested order
         """
-        if order == 'value':
+        if order == "value":
             # Value-based ordering: sort by concentration value (highest to lowest)
             concentrations = set()
             for well in self.wells:
@@ -582,18 +679,26 @@ class Sample:
             else:
                 return np.array([0.0])
 
-        elif order == 'original':
+        elif order == "original":
             # Original plate design order: include ALL wells (ignore exclusions for positioning)
             concentration_positions = {}
             for well in self.wells:
                 if well.concentration is not None:
                     if well.concentration not in concentration_positions:
-                        concentration_positions[well.concentration] = (well.row, well.column)
+                        concentration_positions[well.concentration] = (
+                            well.row,
+                            well.column,
+                        )
                     else:
                         # Keep the earliest position (top-left priority)
                         curr_row, curr_col = concentration_positions[well.concentration]
-                        if (well.row < curr_row) or (well.row == curr_row and well.column < curr_col):
-                            concentration_positions[well.concentration] = (well.row, well.column)
+                        if (well.row < curr_row) or (
+                            well.row == curr_row and well.column < curr_col
+                        ):
+                            concentration_positions[well.concentration] = (
+                                well.row,
+                                well.column,
+                            )
 
             # Sort by position but only return concentrations that have non-excluded wells
             available_concentrations = set()
@@ -602,7 +707,10 @@ class Sample:
                     available_concentrations.add(well.concentration)
 
             sorted_concentrations = [
-                conc for conc, pos in sorted(concentration_positions.items(), key=lambda x: x[1])
+                conc
+                for conc, pos in sorted(
+                    concentration_positions.items(), key=lambda x: x[1]
+                )
                 if conc in available_concentrations
             ]
 
@@ -620,12 +728,20 @@ class Sample:
                 if well.concentration is not None:
                     # Track the earliest (topmost-leftmost) position for each concentration
                     if well.concentration not in concentration_positions:
-                        concentration_positions[well.concentration] = (well.row, well.column)
+                        concentration_positions[well.concentration] = (
+                            well.row,
+                            well.column,
+                        )
                     else:
                         # Keep the earliest position (top-left priority: row first, then column)
                         curr_row, curr_col = concentration_positions[well.concentration]
-                        if (well.row < curr_row) or (well.row == curr_row and well.column < curr_col):
-                            concentration_positions[well.concentration] = (well.row, well.column)
+                        if (well.row < curr_row) or (
+                            well.row == curr_row and well.column < curr_col
+                        ):
+                            concentration_positions[well.concentration] = (
+                                well.row,
+                                well.column,
+                            )
 
                     # Track which concentrations are available (have non-excluded wells)
                     if not well.is_excluded():
@@ -634,7 +750,10 @@ class Sample:
             # Sort concentrations by their original plate position (row, column)
             # and filter to only include available concentrations
             sorted_available_concentrations = [
-                conc for conc, pos in sorted(concentration_positions.items(), key=lambda x: x[1])
+                conc
+                for conc, pos in sorted(
+                    concentration_positions.items(), key=lambda x: x[1]
+                )
                 if conc in available_concentrations
             ]
 
@@ -652,9 +771,11 @@ class Sample:
         bool
             True if time series statistics exist, False otherwise
         """
-        return (hasattr(self, 'time_series_mean') and
-                self.time_series_mean and
-                len(self.time_series_mean) > 0)
+        return (
+            hasattr(self, "time_series_mean")
+            and self.time_series_mean
+            and len(self.time_series_mean) > 0
+        )
 
     def get_time_series_concentration_order(self) -> Optional[np.ndarray]:
         """
@@ -665,7 +786,10 @@ class Sample:
         np.ndarray or None
             Array of concentrations in time series mean column order, or None if no time series statistics exist
         """
-        if hasattr(self, '_timeseries_concentration_order') and self._timeseries_concentration_order is not None:
+        if (
+            hasattr(self, "_timeseries_concentration_order")
+            and self._timeseries_concentration_order is not None
+        ):
             return self._timeseries_concentration_order.copy()
         return None
 
@@ -683,8 +807,12 @@ class Sample:
             measurement_types.update(well.get_available_measurements())
         return list(measurement_types)
 
-    def calculate_statistics(self, measurement_types: Optional[List[str]] = None,
-                           error_type: str = 'std', concentration_order: str = 'value'):
+    def calculate_statistics(
+        self,
+        measurement_types: Optional[List[str]] = None,
+        error_type: str = "std",
+        concentration_order: str = "value",
+    ):
         """
         Calculate replicate statistics for this sample.
 
@@ -714,7 +842,9 @@ class Sample:
 
         # Get concentrations using the specified ordering for time series organization
         # This determines both the concentration array AND time series column order
-        self.concentrations = self.get_concentrations_custom_order(order=concentration_order)
+        self.concentrations = self.get_concentrations_custom_order(
+            order=concentration_order
+        )
 
         # Store the canonical concentration order used for time series data
         # This ensures get_concentrations() always returns the same order as time series columns
@@ -728,8 +858,9 @@ class Sample:
         # Every measurement is rebuilt, not just the requested ones: the
         # concentration axis is shared across measurements, so repopulating a
         # subset would leave the rest on the old axis.
-        self._populate_time_series(available_measurements,
-                                   concentrations=self.concentrations)
+        self._populate_time_series(
+            available_measurements, concentrations=self.concentrations
+        )
 
         # Clear existing derived data to ensure clean recalculation
         self.time_series_mean.clear()
@@ -748,7 +879,9 @@ class Sample:
         for measurement_type in measurement_types:
             self._calculate_measurement_statistics(measurement_type, error_type)
 
-    def _calculate_measurement_statistics(self, measurement_type: str, error_type: str = 'std'):
+    def _calculate_measurement_statistics(
+        self, measurement_type: str, error_type: str = "std"
+    ):
         """Calculate statistics for a specific measurement type from raw time series data."""
         if measurement_type not in self.time_series:
             return
@@ -782,25 +915,29 @@ class Sample:
             mean_array[:, conc_idx] = np.nanmean(conc_data, axis=1)
 
             # Calculate error
-            if error_type == 'std':
+            if error_type == "std":
                 error_array[:, conc_idx] = np.nanstd(conc_data, axis=1, ddof=1)
-            elif error_type == 'sem':
+            elif error_type == "sem":
                 # Count valid (non-NaN) values for each timepoint
                 valid_count = np.sum(~np.isnan(conc_data), axis=1)
-                error_array[:, conc_idx] = np.nanstd(conc_data, axis=1, ddof=1) / np.sqrt(valid_count)
+                error_array[:, conc_idx] = np.nanstd(
+                    conc_data, axis=1, ddof=1
+                ) / np.sqrt(valid_count)
 
             # Store replicate count (count non-NaN values)
             valid_replicates = np.sum(~np.isnan(conc_data), axis=0)
             if len(valid_replicates) > 0:
-                self.n_replicates[f"{measurement_type}_{concentration}"] = int(np.max(valid_replicates))
+                self.n_replicates[f"{measurement_type}_{concentration}"] = int(
+                    np.max(valid_replicates)
+                )
 
         # Store results
         self.time_series_mean[measurement_type] = mean_array
         self.time_series_error[measurement_type] = error_array
 
-    def calculate_data_source_statistics(self, data_source: str,
-                                        measurements: list = None,
-                                        error_type: str = 'std') -> None:
+    def calculate_data_source_statistics(
+        self, data_source: str, measurements: list = None, error_type: str = "std"
+    ) -> None:
         """
         Calculate mean and error statistics for an arbitrary data source attribute.
 
@@ -835,7 +972,7 @@ class Sample:
 
             if len(data.shape) == 3:
                 mean = np.nanmean(data, axis=1)
-                if error_type == 'std':
+                if error_type == "std":
                     error = np.nanstd(data, axis=1, ddof=1)
                 else:  # sem
                     n_replicates = data.shape[1]
@@ -850,8 +987,9 @@ class Sample:
         setattr(self, mean_attr, mean_dict)
         setattr(self, error_attr, error_dict)
 
-    def get_individual_replicate_data(self, measurement_type: str,
-                                     concentration: float) -> Optional[np.ndarray]:
+    def get_individual_replicate_data(
+        self, measurement_type: str, concentration: float
+    ) -> Optional[np.ndarray]:
         """
         Get individual replicate time series data for a measurement at a specific concentration.
 
@@ -872,7 +1010,9 @@ class Sample:
             return None
 
         # Get raw time series data
-        raw_data = self.time_series[measurement_type]  # shape: (n_timepoints, n_replicates, n_concentrations)
+        raw_data = self.time_series[
+            measurement_type
+        ]  # shape: (n_timepoints, n_replicates, n_concentrations)
 
         # Find concentration index
         if self.concentrations is None:
@@ -884,8 +1024,9 @@ class Sample:
         except IndexError:
             return None
 
-    def calculate_blanked_data(self, blank_sample: 'Sample',
-                             measurement_types: Optional[List[str]] = None):
+    def calculate_blanked_data(
+        self, blank_sample: "Sample", measurement_types: Optional[List[str]] = None
+    ):
         """
         Calculate blank-subtracted data using a blank sample.
 
@@ -900,8 +1041,10 @@ class Sample:
             measurement_types = list(self.time_series.keys())
 
         for measurement_type in measurement_types:
-            if (measurement_type in self.time_series and
-                measurement_type in blank_sample.time_series):
+            if (
+                measurement_type in self.time_series
+                and measurement_type in blank_sample.time_series
+            ):
 
                 # Subtract blank from raw data: (n_timepoints, n_replicates, n_concentrations)
                 sample_data = self.time_series[measurement_type]
@@ -932,9 +1075,56 @@ class Sample:
 
                 self.blanked_data[measurement_type] = sample_data - blank_data
 
-    def calculate_normalized_data(self, od_measurement: str = 'OD600',
-                                offset: float = 0.01,
-                                measurement_types: Optional[List[str]] = None):
+    def subtract_blank_by_well(
+        self,
+        baseline_for: Callable[[Well, str], np.ndarray],
+        measurement_types: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Blank-subtract each replicate against a baseline chosen for its well.
+
+        Unlike :meth:`calculate_blanked_data`, which applies one blank to every
+        replicate, this asks ``baseline_for(well, measurement)`` for the 1-D
+        background trace of each replicate's own well. That is what lets a
+        sample spanning several plates be blanked plate by plate.
+
+        Parameters
+        ----------
+        baseline_for : callable
+            ``(well, measurement) -> 1-D array`` of background per timepoint.
+            Traces are truncated, or padded with NaN, to this sample's time
+            axis. It may raise to signal that no baseline exists; nothing is
+            stored in that case, so a sample is never left half blanked.
+        measurement_types : list of str, optional
+            Defaults to every measurement in ``time_series``.
+        """
+        if measurement_types is None:
+            measurement_types = list(self.time_series.keys())
+
+        results = {}
+        for measurement_type in measurement_types:
+            if measurement_type not in self.time_series:
+                continue
+            data = self.time_series[measurement_type]
+            n_timepoints = data.shape[0]
+            blanked = data.copy()
+            slots = self.replicate_wells.get(measurement_type, [])
+            for conc_idx, wells in enumerate(slots):
+                for rep_idx, well in enumerate(wells):
+                    baseline = _fit_length(
+                        baseline_for(well, measurement_type), n_timepoints
+                    )
+                    blanked[:, rep_idx, conc_idx] -= baseline
+            results[measurement_type] = blanked
+
+        self.blanked_data.update(results)
+
+    def calculate_normalized_data(
+        self,
+        od_measurement: str = "OD600",
+        offset: float = 0.01,
+        measurement_types: Optional[List[str]] = None,
+    ):
         """
         Calculate normalized data: measurement / (offset + OD).
 
@@ -954,30 +1144,40 @@ class Sample:
         use_time_series = od_measurement in self.time_series
 
         if not use_blanked_data and not use_time_series:
-            logger.warning(f"{od_measurement} not found in either blanked data or time series data. Cannot normalize.")
+            logger.warning(
+                f"{od_measurement} not found in either blanked data or time series data. Cannot normalize."
+            )
             return
 
         # Determine data source and issue warnings if needed
         if use_blanked_data:
-            od_data = self.blanked_data[od_measurement]  # shape: (n_timepoints, n_replicates, n_concentrations)
+            od_data = self.blanked_data[
+                od_measurement
+            ]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.blanked_data
-            data_type_name = "blanked data"
         else:
-            logger.warning(f"Using raw time series data for normalization instead of blanked data. "
-                  f"Consider running calculate_blanked_data() first for more accurate results.")
-            od_data = self.time_series[od_measurement]  # shape: (n_timepoints, n_replicates, n_concentrations)
+            logger.warning(
+                "Using raw time series data for normalization instead of blanked data. "
+                "Consider running calculate_blanked_data() first for more accurate results."
+            )
+            od_data = self.time_series[
+                od_measurement
+            ]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.time_series
-            data_type_name = "time series data"
 
         if measurement_types is None:
             measurement_types = list(data_source.keys())
 
         for measurement_type in measurement_types:
             if measurement_type in data_source:
-                measurement_data = data_source[measurement_type]  # shape: (n_timepoints, n_replicates, n_concentrations)
+                measurement_data = data_source[
+                    measurement_type
+                ]  # shape: (n_timepoints, n_replicates, n_concentrations)
 
                 # Calculate normalized data element-wise
-                self.normalized_data[measurement_type] = measurement_data / (od_data + offset)
+                self.normalized_data[measurement_type] = measurement_data / (
+                    od_data + offset
+                )
 
     def fold_change_at_timepoint(self, measurement_type: str, timepoint_idx: int):
         """
@@ -1067,7 +1267,9 @@ class Sample:
             columns=list(range(n_timepoints)),
         )
 
-    def get_data(self, measurement_type: str, data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
+    def get_data(
+        self, measurement_type: str, data_type: str = "time_series_mean"
+    ) -> Optional[np.ndarray]:
         """
         Get data for a specific measurement and data type.
 
@@ -1087,8 +1289,12 @@ class Sample:
         data_dict = getattr(self, data_type, {})
         return data_dict.get(measurement_type)
 
-    def get_concentration_slice(self, measurement_type: str, concentration: float,
-                              data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
+    def get_concentration_slice(
+        self,
+        measurement_type: str,
+        concentration: float,
+        data_type: str = "time_series_mean",
+    ) -> Optional[np.ndarray]:
         """
         Get time series data for a specific concentration.
 
@@ -1123,8 +1329,12 @@ class Sample:
         except IndexError:
             return None
 
-    def get_timepoint_slice(self, measurement_type: str, timepoint_idx: int,
-                          data_type: str = 'time_series_mean') -> Optional[np.ndarray]:
+    def get_timepoint_slice(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        data_type: str = "time_series_mean",
+    ) -> Optional[np.ndarray]:
         """
         Get data across all concentrations for a specific timepoint.
 
@@ -1151,7 +1361,9 @@ class Sample:
             if data.ndim == 2:
                 return data[timepoint_idx, :]
             elif data.ndim == 3:
-                return data[timepoint_idx, :, :]  # Returns (n_replicates, n_concentrations)
+                return data[
+                    timepoint_idx, :, :
+                ]  # Returns (n_replicates, n_concentrations)
             else:
                 return None
         except IndexError:

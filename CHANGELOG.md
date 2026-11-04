@@ -83,6 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Fold change refuses to guess between controls.** When several samples
+  could be the reference — two negative controls, say, or two controls loaded
+  through `Plate(controls=[...])`, which carry no polarity —
+  `calculate_fold_change()` raises and names them. Set
+  `frame['S'].matched_control = 'NC'` to choose. It previously used whichever
+  came first.
+- **Code style is enforced.** black, isort and flake8 run in CI and in a
+  pre-commit hook, at pinned versions. See `CONTRIBUTING.md`.
 - **The library logs instead of printing.** 66 `print()` calls became
   `logger.info` (progress) and `logger.warning` (problems), so importing data no
   longer writes to stdout. Nothing is emitted unless you ask:
@@ -137,6 +145,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Blank subtraction crashed on any plate with inducers or antibiotics.**
+  Matching keys called `tuple()` on each condition value, but wells store them
+  as plain floats — exactly what the layout loaders and
+  `set_sample_info(inducers=...)` produce — so
+  `calculate_blank_subtracted_timeseries()` and `calculate_fold_change()`
+  raised `TypeError: 'float' object is not iterable`.
+- **Per-plate matching used only a sample's first plate.** With
+  `pool_controls=False` (the default), a sample spanning plates had every
+  replicate blanked against, and compared with, references from the plate of
+  its first well. Each replicate now uses its own plate's blank, zero-dose
+  wells and control wells. A plate with no blank is reported and the sample
+  skipped, rather than blanked against another plate.
+- **Fold change had units when the control wasn't run at the dose.** That is
+  the usual case for a negative control, and `calculate_fold_change()` divided
+  `Sample_C / Sample_0` by the control's normalized zero-dose signal as well,
+  so results scaled with the control's brightness: a 3× induction came out as
+  0.0138. It is now `Sample_C / Sample_0`. Where the control *was* run at the
+  dose, it is still divided by `Control_C / Control_0`. **Fold-change values
+  computed before this fix are wrong wherever the control lacked the dose.**
+- **`align_replicates_by_od()` built inconsistent samples.** It assembled
+  them by hand, and:
+  - kept `sample.wells[r]` for each surviving replicate *index*, so a sample
+    with several doses kept only its first dose's wells;
+  - reset `negative_control` / `positive_control` to a bare `control`, and
+    left out the fold-change attributes;
+  - left the wells unaligned, so anything that re-read them —
+    `calculate_fold_change()`, blank subtraction — crashed on mismatched
+    lengths or used unaligned data;
+  - required every blank to be listed in `blanks=`, since blank wells never
+    reach an OD threshold.
+
+  Aligned samples are now built through `Sample()` from shifted copies of
+  their wells, and samples whose role is `blank` are treated as blanks
+  without being listed.
+- **`calculate_fold_change()` could take a positive control as the
+  reference**, and ignored `matched_control`. It took the first sample with
+  `is_control` set. It now uses `matched_control` when set, otherwise the one
+  negative control (or the one control of unspecified polarity), and raises if
+  several qualify. `keep_controls_separate` no longer matches a positive
+  control either.
 - **Well IDs past row Z were malformed.** Identifiers were built with
   `chr(ord('A') + row)` in thirteen places, which runs off the end of the
   alphabet: a 1536-well plate has 32 rows, so 288 of its wells were named
@@ -200,4 +248,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-None outstanding. The suite carries no `xfail` markers.
+Found in review; not yet fixed.
+
+- **`match_inducers=True` matches blanks on the first well's inducer dose.** A
+  sample takes its inducers from its first well, so when the dose series is an
+  inducer, a sample whose first well carries a non-zero dose finds no blank.
+  Pass `match_inducers=False` to `calculate_blank_subtracted_timeseries()`.
+  `calculate_fold_change()` is unaffected — it matches blanks without inducers
+  — but it re-runs blank subtraction with the default internally, so it may
+  log a spurious "No blank found" warning.
+- **`Plate.load_layout_csv(..., 'antibiotics')` stores a string** in
+  `well.antibiotics`, which is a dict everywhere else.
+- **Empty cells in a layout CSV likely become the sample type `'nan'`**,
+  creating a sample of empty wells. Unconfirmed against a real layout.
+- **`import_results()` may drop the last read.** It sizes the time axis as
+  `int(run_time / sampling_rate)`, which truncates and does not count the
+  reading at t = 0. Unconfirmed against a real export.
+- **`SampleFrame.summary()`** prints a literal `\n` instead of line breaks, and
+  always reports one concentration.
+- **SEM in `calculate_data_source_statistics()`** divides by the padded
+  replicate count rather than the number of valid replicates, so it is too
+  small when replicate counts are uneven.
+- **Rows past Z** still break `Plate.to_dataframe()` and `plate[("AA", 1)]`,
+  which parse well IDs by hand.
+- **`Plate.get_plate_matrix("fluorescence")`** reads an attribute that no
+  longer exists and always returns NaN.
+- **The `print_*` methods print nothing** unless logging is configured, since
+  the move to logging.
+- **Five test files can't fail**: they print results instead of asserting
+  them.
+
+The suite carries no `xfail` markers.

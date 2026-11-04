@@ -3,12 +3,13 @@ Unit conversion and data transformation utilities.
 """
 
 from typing import Union
+
 import numpy as np
 
 
-def convert_units(value: Union[float, np.ndarray],
-                 from_unit: str,
-                 to_unit: str) -> Union[float, np.ndarray]:
+def convert_units(
+    value: Union[float, np.ndarray], from_unit: str, to_unit: str
+) -> Union[float, np.ndarray]:
     """
     Convert between different units commonly used in fluorescence assays.
 
@@ -47,8 +48,10 @@ def convert_units(value: Union[float, np.ndarray],
     }
 
     # Add reverse conversions
-    reverse_factors = {(to_unit, from_unit): 1/factor
-                      for (from_unit, to_unit), factor in concentration_factors.items()}
+    reverse_factors = {
+        (to_unit, from_unit): 1 / factor
+        for (from_unit, to_unit), factor in concentration_factors.items()
+    }
     concentration_factors.update(reverse_factors)
 
     # Check if conversion exists

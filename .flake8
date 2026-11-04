@@ -1,0 +1,7 @@
+[flake8]
+# black owns code formatting at 88 columns. flake8's limit is a looser
+# ceiling that only catches strings, comments and docstrings black won't wrap.
+max-line-length = 120
+# E203/W503 contradict black's own style.
+extend-ignore = E203, W503
+exclude = .git, __pycache__, build, dist, *.egg-info, .venv

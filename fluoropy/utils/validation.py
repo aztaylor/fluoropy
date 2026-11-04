@@ -3,7 +3,8 @@ Validation utilities for fluorescence assay data.
 """
 
 import re
-from typing import Union, List, Tuple, Optional
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 
 
@@ -39,13 +40,13 @@ def validate_well_position(position: str, plate_format: str = "96") -> bool:
         raise ValueError("Well position must be a string")
 
     # Check format using regex
-    pattern = r'^[A-Z]+\d+$'
+    pattern = r"^[A-Z]+\d+$"
     if not re.match(pattern, position):
         raise ValueError(f"Invalid well position format: {position}")
 
     # Extract row and column
-    row_letters = ''.join(c for c in position if c.isalpha())
-    col_digits = ''.join(c for c in position if c.isdigit())
+    row_letters = "".join(c for c in position if c.isalpha())
+    col_digits = "".join(c for c in position if c.isdigit())
 
     if not row_letters or not col_digits:
         raise ValueError(f"Invalid well position: {position}")
@@ -58,18 +59,24 @@ def validate_well_position(position: str, plate_format: str = "96") -> bool:
     max_rows, max_cols = _get_plate_dimensions(plate_format)
 
     if row_index < 0 or row_index >= max_rows:
-        raise ValueError(f"Row {row_letters} out of range for {plate_format}-well plate")
+        raise ValueError(
+            f"Row {row_letters} out of range for {plate_format}-well plate"
+        )
 
     if col_index < 0 or col_index >= max_cols:
-        raise ValueError(f"Column {col_digits} out of range for {plate_format}-well plate")
+        raise ValueError(
+            f"Column {col_digits} out of range for {plate_format}-well plate"
+        )
 
     return True
 
 
-def validate_concentration(concentration: Union[float, int],
-                          min_value: float = 0.0,
-                          max_value: Optional[float] = None,
-                          allow_zero: bool = True) -> bool:
+def validate_concentration(
+    concentration: Union[float, int],
+    min_value: float = 0.0,
+    max_value: Optional[float] = None,
+    allow_zero: bool = True,
+) -> bool:
     """
     Validate concentration values.
 
@@ -122,10 +129,12 @@ def validate_concentration(concentration: Union[float, int],
     return True
 
 
-def validate_fluorescence(fluorescence: Union[float, int, List[float]],
-                         min_value: float = 0.0,
-                         max_value: Optional[float] = None,
-                         allow_negative: bool = False) -> bool:
+def validate_fluorescence(
+    fluorescence: Union[float, int, List[float]],
+    min_value: float = 0.0,
+    max_value: Optional[float] = None,
+    allow_negative: bool = False,
+) -> bool:
     """
     Validate fluorescence values.
 
@@ -219,8 +228,10 @@ def validate_plate_format(plate_format: str) -> bool:
         raise TypeError("Plate format must be a string")
 
     if plate_format not in supported_formats:
-        raise ValueError(f"Unsupported plate format: {plate_format}. "
-                        f"Supported formats: {supported_formats}")
+        raise ValueError(
+            f"Unsupported plate format: {plate_format}. "
+            f"Supported formats: {supported_formats}"
+        )
 
     return True
 
@@ -257,8 +268,9 @@ def validate_well_type(well_type: str) -> bool:
         raise TypeError("Well type must be a string")
 
     if well_type.lower() not in valid_types:
-        raise ValueError(f"Invalid well type: {well_type}. "
-                        f"Valid types: {valid_types}")
+        raise ValueError(
+            f"Invalid well type: {well_type}. " f"Valid types: {valid_types}"
+        )
 
     return True
 
@@ -268,17 +280,13 @@ def _letters_to_number(letters: str) -> int:
     """Convert letters to number (A=1, B=2, ..., AA=27, etc.)."""
     result = 0
     for char in letters.upper():
-        result = result * 26 + (ord(char) - ord('A') + 1)
+        result = result * 26 + (ord(char) - ord("A") + 1)
     return result
 
 
 def _get_plate_dimensions(plate_format: str) -> Tuple[int, int]:
     """Get plate dimensions (rows, cols) for given format."""
-    dimensions = {
-        "96": (8, 12),
-        "384": (16, 24),
-        "1536": (32, 48)
-    }
+    dimensions = {"96": (8, 12), "384": (16, 24), "1536": (32, 48)}
     return dimensions[plate_format]
 
 
@@ -317,11 +325,14 @@ def validate_data_consistency(wells: List, check_types: List[str] = None) -> boo
         # Check that control wells have similar fluorescence
         controls = [w for w in wells if w.well_type == "control"]
         if len(controls) > 1:
-            fluorescence_values = [w.fluorescence for w in controls
-                                 if w.fluorescence is not None]
+            fluorescence_values = [
+                w.fluorescence for w in controls if w.fluorescence is not None
+            ]
             if fluorescence_values:
                 cv = np.std(fluorescence_values) / np.mean(fluorescence_values)
                 if cv > 0.2:  # 20% CV threshold
-                    raise ValueError(f"High variability in control wells (CV: {cv:.1%})")
+                    raise ValueError(
+                        f"High variability in control wells (CV: {cv:.1%})"
+                    )
 
     return True
