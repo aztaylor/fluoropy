@@ -1010,8 +1010,12 @@ class Sample:
                 if error_type == "std":
                     error = np.nanstd(data, axis=1, ddof=1)
                 else:  # sem
-                    n_replicates = data.shape[1]
-                    error = np.nanstd(data, axis=1, ddof=1) / np.sqrt(n_replicates)
+                    # Count the replicates actually present at each point. The
+                    # replicate axis is NaN-padded to the largest group, so
+                    # data.shape[1] overstated n -- and understated the SEM --
+                    # wherever replicate counts were uneven.
+                    n_valid = np.sum(~np.isnan(data), axis=1)
+                    error = np.nanstd(data, axis=1, ddof=1) / np.sqrt(n_valid)
             else:
                 mean = data
                 error = np.zeros_like(data)

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from ..utils.import_data import import_results
-from .well import Well, parse_well_id
+from .well import Well, row_index
 from .well import well_id as make_well_id
 
 logger = logging.getLogger(__name__)
@@ -429,7 +429,8 @@ class Plate:
             # Support (row, col) indexing
             row, col = well_id
             if isinstance(row, str):
-                row = ord(row.upper()) - ord("A")
+                # row_index handles AA, AB, ... -- ord() ran past 'Z'.
+                row = row_index(row)
             if isinstance(col, str):
                 col = int(col) - 1
             if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -618,48 +619,54 @@ class Plate:
                 time_points = self.global_time_points.copy()
                 well.time_points = time_points.reshape(-1)  # Ensure it's a 1D array
 
-    def get_plate_matrix(self, value_type: str = "fluorescence") -> np.ndarray:
+    def get_plate_matrix(
+        self, value_type: str = "concentration", timepoint_idx: int = -1
+    ) -> np.ndarray:
         """
-        Get plate data as a 2D matrix for visualization.
+        Plate data as a 2-D array matching the plate layout, for visualization.
 
         Parameters
         ----------
-        value_type : str, default "fluorescence"
-            Type of data to extract: "fluorescence", "concentration"
+        value_type : str, default "concentration"
+            ``"concentration"``, or the name of a measurement (e.g. ``"OD600"``)
+            to read each well's value at ``timepoint_idx``.
+        timepoint_idx : int, default -1
+            Timepoint for a measurement; the default is the last read.
 
         Returns
         -------
         np.ndarray
-            2D array representing the plate layout
+            ``(rows, cols)``, NaN where a well has no value.
+
+        Raises
+        ------
+        ValueError
+            If ``value_type`` is neither ``"concentration"`` nor a measurement
+            any well has. The old default, ``"fluorescence"``, read an
+            attribute wells no longer have and returned all NaN.
         """
+        if value_type != "concentration":
+            available = sorted(
+                {m for well in self.wells.values() for m in well.time_series}
+            )
+            if value_type not in available:
+                raise ValueError(
+                    f"No measurement {value_type!r} on plate '{self.name}'. Use "
+                    f"'concentration' or one of {available}."
+                )
+
         matrix = np.full((self.rows, self.cols), np.nan)
-
         for well in self.wells.values():
-            # Get row and column indices
-            if hasattr(well, "row_index") and hasattr(well, "column_index"):
-                row_idx = well.row_index
-                col_idx = well.column_index
+            if value_type == "concentration":
+                value = well.concentration
             else:
-                # Parse from well_id
-                row_idx, col_idx = parse_well_id(well.well_id)
-
-            if (
-                value_type == "fluorescence"
-                and hasattr(well, "fluorescence")
-                and well.fluorescence is not None
-            ):
-                # Handle both single values and time series
-                if isinstance(well.fluorescence, list):
-                    matrix[row_idx, col_idx] = well.fluorescence[-1]  # Latest timepoint
-                else:
-                    matrix[row_idx, col_idx] = well.fluorescence
-            elif (
-                value_type == "concentration"
-                and hasattr(well, "concentration")
-                and well.concentration is not None
-            ):
-                matrix[row_idx, col_idx] = well.concentration
-
+                series = well.time_series.get(value_type)
+                try:
+                    value = None if series is None else series[timepoint_idx]
+                except IndexError:
+                    value = None
+            if value is not None:
+                matrix[well.row, well.column] = value
         return matrix
 
     # ======================================================================
@@ -690,8 +697,8 @@ class Plate:
         for well_id, well in self.wells.items():
             base_data = {
                 "well_id": well_id,
-                "row": well.well_id[0],
-                "column": int(well.well_id[1:]),
+                "row": well.row_letter,
+                "column": well.column_number,
                 "sample_type": getattr(well, "sample_type", None),
                 "concentration": getattr(well, "concentration", None),
                 "is_blank": getattr(well, "is_blank", False),
@@ -903,44 +910,43 @@ class Plate:
         return sample_map
 
     def print_concentration_summary(self):
-        """Print a summary of concentrations in the plate"""
+        """
+        Print a summary of concentrations in the plate.
+
+        Prints rather than logs: it is called to show the summary. Logging it
+        left it invisible unless logging had been configured.
+        """
         concentrations = [
             w.concentration for w in self.wells.values() if w.concentration is not None
         ]
 
-        if concentrations:
-            logger.info(f"Concentration Summary for {self.name}:")
-            logger.info(
-                f"  Range: {min(concentrations):.6f} - {max(concentrations):.6f}"
-            )
-            logger.info(f"  Unique values: {len(set(concentrations))}")
-            logger.info(f"  Wells with concentrations: {len(concentrations)}")
+        if not concentrations:
+            print(f"No concentrations found in plate {self.name}")
+            return
 
-            # Show unique concentrations
-            unique_concs = sorted(set(concentrations))
-            logger.info(f"  Unique concentrations: {unique_concs}")
-        else:
-            logger.info(f"No concentrations found in plate {self.name}")
+        print(f"Concentration Summary for {self.name}:")
+        print(f"  Range: {min(concentrations):.6f} - {max(concentrations):.6f}")
+        print(f"  Unique values: {len(set(concentrations))}")
+        print(f"  Wells with concentrations: {len(concentrations)}")
+        print(f"  Unique concentrations: {sorted(set(concentrations))}")
 
     def print_sample_summary(self):
-        """Print a summary of sample types in the plate"""
+        """Print a summary of sample types in the plate. See print_concentration_summary."""
+        from collections import Counter
+
         sample_types = [
             w.sample_type for w in self.wells.values() if w.sample_type is not None
         ]
 
-        if sample_types:
-            logger.info(f"Sample Summary for {self.name}:")
-            logger.info(f"  Unique sample types: {len(set(sample_types))}")
-            logger.info(f"  Wells with samples: {len(sample_types)}")
+        if not sample_types:
+            print(f"No samples found in plate {self.name}")
+            return
 
-            # Show sample type counts
-            from collections import Counter
-
-            sample_counts = Counter(sample_types)
-            for sample_type, count in sample_counts.items():
-                logger.info(f"    {sample_type}: {count} wells")
-        else:
-            logger.info(f"No samples found in plate {self.name}")
+        print(f"Sample Summary for {self.name}:")
+        print(f"  Unique sample types: {len(set(sample_types))}")
+        print(f"  Wells with samples: {len(sample_types)}")
+        for sample_type, count in Counter(sample_types).items():
+            print(f"    {sample_type}: {count} wells")
 
     def validate_concentration_loading(self) -> bool:
         """

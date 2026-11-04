@@ -288,10 +288,11 @@ class SampleFrame:
             if sample.time_series and n_measurements > 0:
                 # Get the first measurement type to check dimensions
                 first_measurement = next(iter(sample.time_series.values()))
-                if (
-                    hasattr(first_measurement, "shape")
-                    and len(first_measurement.shape) == 2
-                ):
+                if getattr(first_measurement, "ndim", 0) == 3:
+                    # (timepoints, replicates, concentrations). This only
+                    # checked for 2-D, so it always reported one concentration.
+                    n_timepoints, _, n_concentrations = first_measurement.shape
+                elif getattr(first_measurement, "ndim", 0) == 2:
                     n_timepoints, n_concentrations = first_measurement.shape
                 elif hasattr(first_measurement, "__len__"):
                     n_timepoints = len(first_measurement)
@@ -335,10 +336,11 @@ class SampleFrame:
             # Add a note if statistics haven't been calculated
             if not sample.time_series:
                 summary_lines.append(
-                    "  Note: Statistics not yet calculated. Call calculate_all_statistics() first."
+                    "  Note: no time series yet. Wells need measurements "
+                    "before samples have data."
                 )
 
-        return "\\n".join(summary_lines)
+        return "\n".join(summary_lines)
 
     def _initialize_samples(self):
         """
