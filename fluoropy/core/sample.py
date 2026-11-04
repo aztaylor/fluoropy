@@ -30,7 +30,7 @@ reference rather than a fold change of their own. It is therefore labelled by
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import numpy as np
 
@@ -48,7 +48,9 @@ from .well import (
 logger = logging.getLogger(__name__)
 
 
-def _freeze_conditions(conditions: Optional[Dict[str, Any]]) -> frozenset:
+def _freeze_conditions(
+    conditions: Optional[Dict[str, Any]], ignore: Iterable[str] = ()
+) -> frozenset:
     """
     Hashable form of an antibiotics / inducers / modifications dict.
 
@@ -59,9 +61,11 @@ def _freeze_conditions(conditions: Optional[Dict[str, Any]]) -> frozenset:
     every plate loader actually stores -- so blank subtraction crashed for any
     plate with an inducer or antibiotic layout.
     """
+    ignore = set(ignore)
     return frozenset(
         (name, tuple(float(x) for x in np.ravel(value)))
         for name, value in (conditions or {}).items()
+        if name not in ignore
     )
 
 
@@ -386,8 +390,35 @@ class Sample:
             _freeze_conditions(self.other_modifications),
         )
 
+    @property
+    def dose_molecules(self) -> set:
+        """
+        Molecules this sample is dosed with: the molecule of interest, plus any
+        antibiotic, inducer or modification whose amount differs between its
+        wells.
+
+        These vary *within* a sample, so the sample-level condition dicts --
+        taken from its first well -- say nothing true about them, and they are
+        left out of blank matching.
+        """
+        doses = {self.moi} if getattr(self, "moi", None) else set()
+        wells = [w for w in self.wells if not w.is_excluded()]
+        for attr in ("antibiotics", "inducers", "other_modifications"):
+            names = {name for w in wells for name in (getattr(w, attr) or {})}
+            for name in names:
+                values = {
+                    _freeze_conditions({name: (getattr(w, attr) or {}).get(name, 0.0)})
+                    for w in wells
+                }
+                if len(values) > 1:
+                    doses.add(name)
+        return doses
+
     def get_matching_key(
-        self, pool_across_plates: bool = False, match_inducers: bool = True
+        self,
+        pool_across_plates: bool = False,
+        match_inducers: bool = True,
+        ignore: Iterable[str] = (),
     ) -> tuple:
         """
         Get condition key for blank/control matching with flexible pooling.
@@ -404,6 +435,10 @@ class Sample:
         match_inducers : bool, default True
             If True, include inducer concentrations in matching key
             If False, exclude inducers (match only on medium, antibiotics, other_mods)
+        ignore : iterable of str, optional
+            Molecules to leave out of every condition dict -- the dose series,
+            which varies across wells and so cannot be matched as a condition.
+            See :attr:`dose_molecules`.
 
         Returns
         -------
@@ -425,7 +460,7 @@ class Sample:
         # Start with medium and antibiotics (always included)
         key_parts = [
             self.medium,
-            _freeze_conditions(self.antibiotics),
+            _freeze_conditions(self.antibiotics, ignore),
         ]
 
         # Conditionally include plate_id for per-plate matching
@@ -434,10 +469,10 @@ class Sample:
 
         # Conditionally include inducers
         if match_inducers:
-            key_parts.append(_freeze_conditions(self.inducers))
+            key_parts.append(_freeze_conditions(self.inducers, ignore))
 
         # Always include other_modifications
-        key_parts.append(_freeze_conditions(self.other_modifications))
+        key_parts.append(_freeze_conditions(self.other_modifications, ignore))
 
         return tuple(key_parts)
 
