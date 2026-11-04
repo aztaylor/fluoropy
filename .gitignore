@@ -151,3 +151,14 @@ CLAUDE.md
 .gitignore
 tests/outputs
 tests/test_import_data_integration.py
+# Obsidian folder notes.
+# This repo lives inside an Obsidian vault (codebase/fluoropy), and a plugin
+# auto-creates an empty "<folder-name>.md" front page in each directory. They
+# are harmless to Obsidian and noise here, so they stay untracked. Real docs
+# (README, CHANGELOG, ARCHITECTURE) are unaffected -- none share a name with a
+# package directory.
+fluoropy.md
+core.md
+analysis.md
+utils.md
+tests.md
