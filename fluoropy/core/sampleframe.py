@@ -3,14 +3,18 @@ SampleFrame class for managing collections of samples from experimental plates.
 """
 
 import logging
-from typing import Dict, List, Optional, Union, Any, Tuple
-import numpy as np
 from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
+
 from .plate import Plate
 from .sample import Sample
 from .well import Well
 
 logger = logging.getLogger(__name__)
+
+
 class SampleFrame:
     """
     An indexable container for Sample objects from experimental plates.
@@ -31,9 +35,12 @@ class SampleFrame:
         Dictionary mapping sample IDs to Sample objects
     """
 
-    def __init__(self, plates: Union[Plate, List[Plate]],
-                 ignored_sample_types: Optional[List[str]] = None,
-                 keep_controls_separate: bool = False):
+    def __init__(
+        self,
+        plates: Union[Plate, List[Plate]],
+        ignored_sample_types: Optional[List[str]] = None,
+        keep_controls_separate: bool = False,
+    ):
         """
         Initialize SampleFrame from plate(s).
 
@@ -63,7 +70,9 @@ class SampleFrame:
             self.name = f"SampleFrame_{len(plates)}plates"
 
         # Store plate information
-        self.plate_ids = [getattr(p, 'name', f'plate_{i}') for i, p in enumerate(self.plates)]
+        self.plate_ids = [
+            getattr(p, "name", f"plate_{i}") for i, p in enumerate(self.plates)
+        ]
 
         # Initialize samples dictionary
         self.samples: Dict[str, Sample] = {}
@@ -146,16 +155,23 @@ class SampleFrame:
 
     def get_blank_samples(self) -> List[str]:
         """Get list of blank sample IDs."""
-        return [sample_id for sample_id, sample in self.samples.items() if sample.is_blank]
+        return [
+            sample_id for sample_id, sample in self.samples.items() if sample.is_blank
+        ]
 
     def get_control_samples(self) -> List[str]:
         """Get list of control sample IDs."""
-        return [sample_id for sample_id, sample in self.samples.items() if sample.is_control]
+        return [
+            sample_id for sample_id, sample in self.samples.items() if sample.is_control
+        ]
 
     def get_test_samples(self) -> List[str]:
         """Get list of test sample IDs (non-blank, non-control)."""
-        return [sample_id for sample_id, sample in self.samples.items()
-                if not sample.is_blank and not sample.is_control]
+        return [
+            sample_id
+            for sample_id, sample in self.samples.items()
+            if not sample.is_blank and not sample.is_control
+        ]
 
     def summary(self) -> str:
         """Generate a summary string of the SampleFrame."""
@@ -182,9 +198,12 @@ class SampleFrame:
             if sample.time_series and n_measurements > 0:
                 # Get the first measurement type to check dimensions
                 first_measurement = next(iter(sample.time_series.values()))
-                if hasattr(first_measurement, 'shape') and len(first_measurement.shape) == 2:
+                if (
+                    hasattr(first_measurement, "shape")
+                    and len(first_measurement.shape) == 2
+                ):
                     n_timepoints, n_concentrations = first_measurement.shape
-                elif hasattr(first_measurement, '__len__'):
+                elif hasattr(first_measurement, "__len__"):
                     n_timepoints = len(first_measurement)
                     n_concentrations = 1
                 else:
@@ -199,25 +218,35 @@ class SampleFrame:
                     measurement_types = set()
                     concentrations = set()
                     for well in sample.wells:
-                        if hasattr(well, 'time_series'):
+                        if hasattr(well, "time_series"):
                             measurement_types.update(well.time_series.keys())
-                        if hasattr(well, 'concentration') and well.concentration is not None:
+                        if (
+                            hasattr(well, "concentration")
+                            and well.concentration is not None
+                        ):
                             concentrations.add(well.concentration)
-                        if hasattr(well, 'time_points') and well.time_points is not None:
+                        if (
+                            hasattr(well, "time_points")
+                            and well.time_points is not None
+                        ):
                             n_timepoints = max(n_timepoints, len(well.time_points))
 
                     n_measurements = len(measurement_types)
                     n_concentrations = len(concentrations)
 
-            summary_lines.extend([
-                f"  Measurements per sample: {n_measurements}",
-                f"  Time points: {n_timepoints}",
-                f"  Concentrations: {n_concentrations}",
-            ])
+            summary_lines.extend(
+                [
+                    f"  Measurements per sample: {n_measurements}",
+                    f"  Time points: {n_timepoints}",
+                    f"  Concentrations: {n_concentrations}",
+                ]
+            )
 
             # Add a note if statistics haven't been calculated
             if not sample.time_series:
-                summary_lines.append("  Note: Statistics not yet calculated. Call calculate_all_statistics() first.")
+                summary_lines.append(
+                    "  Note: Statistics not yet calculated. Call calculate_all_statistics() first."
+                )
 
         return "\\n".join(summary_lines)
 
@@ -246,7 +275,11 @@ class SampleFrame:
         for plate_idx, plate in enumerate(self.plates):
             wells = self._get_wells_from_plate(plate)
             for well in wells:
-                if well.sample_type is not None and not well.is_excluded() and str(well.sample_type) not in self.ignored_sample_types:
+                if (
+                    well.sample_type is not None
+                    and not well.is_excluded()
+                    and str(well.sample_type) not in self.ignored_sample_types
+                ):
                     sample_groups[well.sample_type].append(well)
 
         for sample_id, wells in sample_groups.items():
@@ -274,9 +307,11 @@ class SampleFrame:
         plate_order = {pid: idx for idx, pid in enumerate(self.plate_ids)}
 
         # --- Pass 1: collect wells ---
-        exp_groups: Dict[str, list] = defaultdict(list)   # sample_type -> wells
+        exp_groups: Dict[str, list] = defaultdict(list)  # sample_type -> wells
         # ctrl_wells_by_plate: plate_id -> {ctrl_type -> [wells]}
-        ctrl_wells_by_plate: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
+        ctrl_wells_by_plate: Dict[str, Dict[str, list]] = defaultdict(
+            lambda: defaultdict(list)
+        )
 
         for plate in self.plates:
             for well in self._get_wells_from_plate(plate):
@@ -285,15 +320,16 @@ class SampleFrame:
                 if str(well.sample_type) in self.ignored_sample_types:
                     continue
                 if well.is_control:
-                    ctrl_wells_by_plate[well.plate_id][str(well.sample_type)].append(well)
+                    ctrl_wells_by_plate[well.plate_id][str(well.sample_type)].append(
+                        well
+                    )
                 else:
                     exp_groups[well.sample_type].append(well)
 
         # --- Pass 2: determine the plate-set for each experimental sample ---
         # plate-set = frozenset of plate_ids the sample has wells on
         sample_plate_set: Dict[str, frozenset] = {
-            st: frozenset(w.plate_id for w in wells)
-            for st, wells in exp_groups.items()
+            st: frozenset(w.plate_id for w in wells) for st, wells in exp_groups.items()
         }
 
         # --- Pass 3: build one composite NC per (plate-set, ctrl_type) ---
@@ -301,7 +337,9 @@ class SampleFrame:
         plate_set_ctrl_to_nc_id: Dict[Tuple, str] = {}
         ctrl_type_counter: Dict[str, int] = defaultdict(int)
 
-        for plate_set in dict.fromkeys(sample_plate_set.values()):  # preserve first-seen order
+        for plate_set in dict.fromkeys(
+            sample_plate_set.values()
+        ):  # preserve first-seen order
             # Collect ctrl_types present on any plate in this set
             ctrl_types_in_set: set = set()
             for pid in plate_set:
@@ -319,8 +357,10 @@ class SampleFrame:
                 nc_wells: list = []
                 for pid in sorted(plate_set, key=lambda p: plate_order.get(p, 0)):
                     nc_wells.extend(
-                        sorted(ctrl_wells_by_plate[pid].get(ctrl_type, []),
-                               key=lambda w: (w.row, w.column))
+                        sorted(
+                            ctrl_wells_by_plate[pid].get(ctrl_type, []),
+                            key=lambda w: (w.row, w.column),
+                        )
                     )
                 # Name it by its frame key, not its control type, so
                 # frame[k].name == k holds. The control type is still
@@ -348,7 +388,8 @@ class SampleFrame:
             # negative control. Roles make the intent expressible instead of
             # depending on how the control happens to be spelled.
             negative = [
-                ct for ct in candidates
+                ct
+                for ct in candidates
                 if self.samples[plate_set_ctrl_to_nc_id[(ps, ct)]].is_negative_control
             ]
             preferred = negative or candidates
@@ -362,18 +403,20 @@ class SampleFrame:
         """Get wells from a plate object."""
         wells = []
 
-        if hasattr(plate, 'wells_flat'):
+        if hasattr(plate, "wells_flat"):
             wells = plate.wells_flat()
-        elif hasattr(plate, 'wells') and isinstance(plate.wells, dict):
+        elif hasattr(plate, "wells") and isinstance(plate.wells, dict):
             wells = list(plate.wells.values())
-        elif hasattr(plate, 'wells') and hasattr(plate.wells, '__iter__'):
+        elif hasattr(plate, "wells") and hasattr(plate.wells, "__iter__"):
             wells = list(plate.wells)
         else:
             logger.warning(f"Cannot extract wells from plate {plate}")
 
         return wells
 
-    def _create_mean_blank(self, blank_sample: 'Sample', measurement_types: List[str]) -> 'Sample':
+    def _create_mean_blank(
+        self, blank_sample: "Sample", measurement_types: List[str]
+    ) -> "Sample":
         """
         Create a blank Sample with mean values across all wells.
 
@@ -408,7 +451,9 @@ class SampleFrame:
                 data = blank_sample.time_series[measurement_type]
 
                 # Average across replicates (axis=1)
-                mean_data = np.nanmean(data, axis=1)  # Shape: (n_timepoints, n_concentrations)
+                mean_data = np.nanmean(
+                    data, axis=1
+                )  # Shape: (n_timepoints, n_concentrations)
 
                 # For a blank with one concentration, take the first (and only) concentration
                 if mean_data.shape[1] == 1:
@@ -425,9 +470,13 @@ class SampleFrame:
 
         return mean_blank_sample
 
-    def _calculate_data_statistics(self, sample: 'Sample', data_source: str,
-                                  measurements: Optional[List[str]] = None,
-                                  error_type: str = 'std') -> None:
+    def _calculate_data_statistics(
+        self,
+        sample: "Sample",
+        data_source: str,
+        measurements: Optional[List[str]] = None,
+        error_type: str = "std",
+    ) -> None:
         """
         Helper method to calculate mean and error statistics for a data source.
 
@@ -446,9 +495,12 @@ class SampleFrame:
         """
         sample.calculate_data_source_statistics(data_source, measurements, error_type)
 
-    def calculate_blank_subtracted_timeseries(self, measurement_types: Optional[List[str]] = None,
-                                              pool_controls: bool = False,
-                                              match_inducers: bool = True) -> None:
+    def calculate_blank_subtracted_timeseries(
+        self,
+        measurement_types: Optional[List[str]] = None,
+        pool_controls: bool = False,
+        match_inducers: bool = True,
+    ) -> None:
         """
         Calculate blank-subtracted time series data for individual samples.
 
@@ -472,13 +524,13 @@ class SampleFrame:
 
         # Group blanks by condition key for efficient lookup
         # Note: Blank keys always exclude plate_id since blanks are merged across plates
-        blanks_by_condition: Dict[tuple, 'Sample'] = {}
+        blanks_by_condition: Dict[tuple, "Sample"] = {}
 
         for sample_id, sample in self.samples.items():
             if sample.is_blank:
                 key = sample.get_matching_key(
                     pool_across_plates=True,  # Always True for blanks (they're merged)
-                    match_inducers=match_inducers
+                    match_inducers=match_inducers,
                 )
                 blanks_by_condition[key] = sample
 
@@ -490,23 +542,29 @@ class SampleFrame:
             # Find matching blank (always exclude plate_id since blanks are merged)
             blank_key = sample.get_matching_key(
                 pool_across_plates=True,  # Always True for blank matching (blanks are merged)
-                match_inducers=match_inducers
+                match_inducers=match_inducers,
             )
             blank_sample = blanks_by_condition.get(blank_key)
 
             if blank_sample is None:
-                logger.warning(f"No blank found for {sample.name} "
-                      f"(medium={sample.medium}, antibiotics={sample.antibiotics}, "
-                      f"plate={sample.plate_id}, inducers={sample.inducers})")
+                logger.warning(
+                    f"No blank found for {sample.name} "
+                    f"(medium={sample.medium}, antibiotics={sample.antibiotics}, "
+                    f"plate={sample.plate_id}, inducers={sample.inducers})"
+                )
                 continue
 
             # If using per-plate matching, filter blank wells to only those from the same plate
             if not pool_controls and blank_sample is not None:
                 # Filter blank wells by plate_id
-                matching_blank_wells = [w for w in blank_sample.wells if w.plate_id == sample.plate_id]
+                matching_blank_wells = [
+                    w for w in blank_sample.wells if w.plate_id == sample.plate_id
+                ]
 
                 if not matching_blank_wells:
-                    logger.warning(f"No blank wells found on plate {sample.plate_id} for {sample.name}")
+                    logger.warning(
+                        f"No blank wells found on plate {sample.plate_id} for {sample.name}"
+                    )
                     continue
 
                 # Create a temporary Sample with only the matching wells
@@ -518,8 +576,9 @@ class SampleFrame:
                 mean_blank = self._create_mean_blank(blank_sample, measurement_types)
                 sample.calculate_blanked_data(mean_blank, measurement_types)
 
-    def calculate_blank_subtracted_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
-                                                         error_type: str = 'std') -> None:
+    def calculate_blank_subtracted_timeseries_statistics(
+        self, measurement_types: Optional[List[str]] = None, error_type: str = "std"
+    ) -> None:
         """
         Calculate mean and error of blank-subtracted timeseries for each sample
         and stores in the sample.blanked_data_mean and sample.blanked_data_error attributes.
@@ -540,7 +599,7 @@ class SampleFrame:
         ValueError
             If error_type is not 'std' or 'sem'
         """
-        if error_type not in ('std', 'sem'):
+        if error_type not in ("std", "sem"):
             raise ValueError(f"error_type must be 'std' or 'sem', got {error_type}")
 
         for sample in self.samples.values():
@@ -548,19 +607,25 @@ class SampleFrame:
                 continue
 
             # Check if blanked data exists
-            if not hasattr(sample, 'blanked_data') or not sample.blanked_data:
-                logger.warning(f"No blank-subtracted timeseries data for {sample.sample_type}. "
-                      f"Call calculate_blank_subtracted_timeseries() first.")
+            if not hasattr(sample, "blanked_data") or not sample.blanked_data:
+                logger.warning(
+                    f"No blank-subtracted timeseries data for {sample.sample_type}. "
+                    f"Call calculate_blank_subtracted_timeseries() first."
+                )
                 continue
 
             # Use helper method to calculate statistics
-            self._calculate_data_statistics(sample, 'blanked_data', measurement_types, error_type)
+            self._calculate_data_statistics(
+                sample, "blanked_data", measurement_types, error_type
+            )
 
-
-    def calculate_normalized_timeseries(self, od_measurement: str = 'OD600',
-                                       alpha: float = 0.01,
-                                       measurement_types: Optional[List[str]] = None,
-                                       pool_controls: bool = False) -> None:
+    def calculate_normalized_timeseries(
+        self,
+        od_measurement: str = "OD600",
+        alpha: float = 0.01,
+        measurement_types: Optional[List[str]] = None,
+        pool_controls: bool = False,
+    ) -> None:
         """
         Calculate normalized time series data using the form: read1 / (alpha + read2).
 
@@ -588,16 +653,23 @@ class SampleFrame:
 
             # Use blank-subtracted data if available, otherwise raw time series
             if sample.blanked_data:
-                sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
+                sample.calculate_normalized_data(
+                    od_measurement, alpha, measurement_types
+                )
                 sample.normalized_timeseries = sample.normalized_data
             else:
-                logger.warning(f"No blank-subtracted data for {sample.name}. "
-                      f"Call calculate_blank_subtracted_timeseries() first. "
-                      f"Using raw data for normalization.")
-                sample.calculate_normalized_data(od_measurement, alpha, measurement_types)
+                logger.warning(
+                    f"No blank-subtracted data for {sample.name}. "
+                    f"Call calculate_blank_subtracted_timeseries() first. "
+                    f"Using raw data for normalization."
+                )
+                sample.calculate_normalized_data(
+                    od_measurement, alpha, measurement_types
+                )
 
-    def calculate_normalized_timeseries_statistics(self, measurement_types: Optional[List[str]] = None,
-                                                   error_type: str = 'std') -> None:
+    def calculate_normalized_timeseries_statistics(
+        self, measurement_types: Optional[List[str]] = None, error_type: str = "std"
+    ) -> None:
         """
         Calculate mean and error of OD normalized fluorescent timeseries for each sample.
 
@@ -621,7 +693,7 @@ class SampleFrame:
         ValueError
             If error_type is not 'std' or 'sem'
         """
-        if error_type not in ('std', 'sem'):
+        if error_type not in ("std", "sem"):
             raise ValueError(f"error_type must be 'std' or 'sem', got {error_type}")
 
         for sample in self.samples.values():
@@ -629,18 +701,25 @@ class SampleFrame:
                 continue
 
             # Check if normalized data exists
-            if not hasattr(sample, 'normalized_data') or not sample.normalized_data:
-                logger.warning(f"No normalized timeseries data for {sample.sample_type}. "
-                      f"Call calculate_normalized_timeseries() first.")
+            if not hasattr(sample, "normalized_data") or not sample.normalized_data:
+                logger.warning(
+                    f"No normalized timeseries data for {sample.sample_type}. "
+                    f"Call calculate_normalized_timeseries() first."
+                )
                 continue
 
             # Use helper method to calculate statistics
-            self._calculate_data_statistics(sample, 'normalized_data', measurement_types, error_type)
+            self._calculate_data_statistics(
+                sample, "normalized_data", measurement_types, error_type
+            )
 
-    def calculate_fold_change(self, measurement: str,
-                              od_measurement: str = 'OD600',
-                              alpha: float = 0.01,
-                              pool_controls: bool = False) -> None:
+    def calculate_fold_change(
+        self,
+        measurement: str,
+        od_measurement: str = "OD600",
+        alpha: float = 0.01,
+        pool_controls: bool = False,
+    ) -> None:
         """
         Calculate log fold change of samples by negative control at each timepoint.
 
@@ -674,8 +753,7 @@ class SampleFrame:
 
         # First ensure we have blank-subtracted and normalized data
         self.calculate_blank_subtracted_timeseries(
-            [measurement, od_measurement],
-            pool_controls=pool_controls
+            [measurement, od_measurement], pool_controls=pool_controls
         )
         self.calculate_normalized_timeseries(od_measurement, alpha, [measurement])
 
@@ -698,11 +776,16 @@ class SampleFrame:
             else:
                 # Per-plate matching - find control on same plate
                 for cand_id, cand_sample in self.samples.items():
-                    if cand_sample.is_control and cand_sample.plate_id == sample.plate_id:
+                    if (
+                        cand_sample.is_control
+                        and cand_sample.plate_id == sample.plate_id
+                    ):
                         control = cand_sample
                         break
                 if control is None:
-                    logger.warning(f"No negative control found for {sample_id} on plate {sample.plate_id}")
+                    logger.warning(
+                        f"No negative control found for {sample_id} on plate {sample.plate_id}"
+                    )
                     continue
 
             fold_change, concentrations = self._calculate_individual_fold_changes(
@@ -713,10 +796,15 @@ class SampleFrame:
             sample.fold_change[measurement] = fold_change
             sample.fold_change_concentrations = concentrations
 
-    def _calculate_individual_fold_changes(self, sample: 'Sample', control: 'Sample',
-                                          measurement: str, od_measurement: str,
-                                          alpha: float, pool_controls: bool = False
-                                          ) -> Tuple[np.ndarray, np.ndarray]:
+    def _calculate_individual_fold_changes(
+        self,
+        sample: "Sample",
+        control: "Sample",
+        measurement: str,
+        od_measurement: str,
+        alpha: float,
+        pool_controls: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calculate fold change for individual replicates with proper normalization.
 
@@ -738,30 +826,38 @@ class SampleFrame:
 
         # Find the blank samples for both sample and control using get_matching_key
         # Note: Blank keys always exclude plate_id since blanks are merged across plates
-        blanks_by_key: Dict[tuple, 'Sample'] = {}
+        blanks_by_key: Dict[tuple, "Sample"] = {}
         for s in self.samples.values():
             if s.is_blank:
                 key = s.get_matching_key(pool_across_plates=True, match_inducers=False)
                 blanks_by_key[key] = s
 
         # Find blanks for sample and control (always use pool_across_plates=True for blank lookup)
-        blank_key = sample.get_matching_key(pool_across_plates=True, match_inducers=False)
+        blank_key = sample.get_matching_key(
+            pool_across_plates=True, match_inducers=False
+        )
         blank = blanks_by_key.get(blank_key)
 
-        control_blank_key = control.get_matching_key(pool_across_plates=True, match_inducers=False)
+        control_blank_key = control.get_matching_key(
+            pool_across_plates=True, match_inducers=False
+        )
         control_blank = blanks_by_key.get(control_blank_key)
 
         # Filter blank wells by plate_id if using per-plate matching
         if not pool_controls:
             if blank is not None:
-                matching_wells = [w for w in blank.wells if w.plate_id == sample.plate_id]
+                matching_wells = [
+                    w for w in blank.wells if w.plate_id == sample.plate_id
+                ]
                 if matching_wells:
                     blank = Sample(blank.name, matching_wells)
                 else:
                     blank = None
 
             if control_blank is not None:
-                matching_wells = [w for w in control_blank.wells if w.plate_id == control.plate_id]
+                matching_wells = [
+                    w for w in control_blank.wells if w.plate_id == control.plate_id
+                ]
                 if matching_wells:
                     control_blank = Sample(control_blank.name, matching_wells)
                 else:
@@ -798,20 +894,28 @@ class SampleFrame:
             raise ValueError(f"No zero-concentration wells found in control")
 
         # Extract time points
-        time_points = sample.time if sample.time is not None else np.arange(len(sample_zero_wells[0].time_series[measurement]))
+        time_points = (
+            sample.time
+            if sample.time is not None
+            else np.arange(len(sample_zero_wells[0].time_series[measurement]))
+        )
         n_timepoints = len(time_points)
 
         # Calculate normalized values for sample at zero concentration
         sample_zero_normalized = self._get_normalized_replicate_values(
             sample_zero_wells, blank, measurement, od_measurement, alpha
         )  # Shape: (n_replicates, n_timepoints)
-        sample_zero_mean = np.mean(sample_zero_normalized, axis=0)  # Shape: (n_timepoints,)
+        sample_zero_mean = np.mean(
+            sample_zero_normalized, axis=0
+        )  # Shape: (n_timepoints,)
 
         # Calculate normalized values for control at zero concentration
         control_zero_normalized = self._get_normalized_replicate_values(
             control_zero_wells, control_blank, measurement, od_measurement, alpha
         )  # Shape: (n_replicates, n_timepoints)
-        control_zero_mean = np.mean(control_zero_normalized, axis=0)  # Shape: (n_timepoints,)
+        control_zero_mean = np.mean(
+            control_zero_normalized, axis=0
+        )  # Shape: (n_timepoints,)
 
         # Build fold change per concentration. Zero concentration is the
         # within-sample reference, so it is not itself a fold change.
@@ -868,8 +972,9 @@ class SampleFrame:
 
         return df
 
-    def calculate_fold_change_statistics(self, data_attribute: str = 'fold_change',
-                                        error_type: str = 'std') -> None:
+    def calculate_fold_change_statistics(
+        self, data_attribute: str = "fold_change", error_type: str = "std"
+    ) -> None:
         """
         Calculate mean and error of a stored data attribute across replicates.
 
@@ -889,30 +994,37 @@ class SampleFrame:
                 continue
 
             data = getattr(sample, data_attribute)
-            if data is None or (isinstance(data, dict) and not data) or \
-               (hasattr(data, 'empty') and data.empty):
+            if (
+                data is None
+                or (isinstance(data, dict) and not data)
+                or (hasattr(data, "empty") and data.empty)
+            ):
                 continue
 
             # Initialize storage
-            if not hasattr(sample, f'{data_attribute}_mean'):
-                setattr(sample, f'{data_attribute}_mean', {})
-            if not hasattr(sample, f'{data_attribute}_error'):
-                setattr(sample, f'{data_attribute}_error', {})
+            if not hasattr(sample, f"{data_attribute}_mean"):
+                setattr(sample, f"{data_attribute}_mean", {})
+            if not hasattr(sample, f"{data_attribute}_error"):
+                setattr(sample, f"{data_attribute}_error", {})
 
-            mean_dict = getattr(sample, f'{data_attribute}_mean')
-            error_dict = getattr(sample, f'{data_attribute}_error')
+            mean_dict = getattr(sample, f"{data_attribute}_mean")
+            error_dict = getattr(sample, f"{data_attribute}_error")
 
             # Handle pandas DataFrame format (from fold_change)
-            if hasattr(data, 'index') and hasattr(data, 'columns'):
-                for concentration in data.index.get_level_values('concentration').unique():
+            if hasattr(data, "index") and hasattr(data, "columns"):
+                for concentration in data.index.get_level_values(
+                    "concentration"
+                ).unique():
                     conc_data = data.loc[concentration].values
                     mean_dict[concentration] = np.mean(conc_data, axis=0)
 
-                    if error_type == 'std':
+                    if error_type == "std":
                         error_dict[concentration] = np.std(conc_data, axis=0, ddof=1)
-                    elif error_type == 'sem':
+                    elif error_type == "sem":
                         n_replicates = conc_data.shape[0]
-                        error_dict[concentration] = np.std(conc_data, axis=0, ddof=1) / np.sqrt(n_replicates)
+                        error_dict[concentration] = np.std(
+                            conc_data, axis=0, ddof=1
+                        ) / np.sqrt(n_replicates)
 
             # Handle dict of numpy arrays format.
             #
@@ -930,8 +1042,9 @@ class SampleFrame:
                 )
 
     @staticmethod
-    def _resolve_fold_change_measurement(sample: 'Sample',
-                                         measurement: Optional[str]) -> Optional[str]:
+    def _resolve_fold_change_measurement(
+        sample: "Sample", measurement: Optional[str]
+    ) -> Optional[str]:
         """
         Pick which measurement's fold change to use.
 
@@ -939,7 +1052,7 @@ class SampleFrame:
         used, since calculating fold change for one measurement is the common
         case; with several, the caller has to say which.
         """
-        available = getattr(sample, 'fold_change', {}) or {}
+        available = getattr(sample, "fold_change", {}) or {}
 
         if measurement is not None:
             return measurement if measurement in available else None
@@ -953,10 +1066,13 @@ class SampleFrame:
             f"pass measurement= to choose one."
         )
 
-    def calculate_hill_fits(self, timepoint_idx: int,
-                           sample_ids: Optional[List[str]] = None,
-                           concentration_idx_range: Optional[Tuple[int, int]] = None,
-                           measurement: Optional[str] = None) -> Dict[str, Dict[str, float]]:
+    def calculate_hill_fits(
+        self,
+        timepoint_idx: int,
+        sample_ids: Optional[List[str]] = None,
+        concentration_idx_range: Optional[Tuple[int, int]] = None,
+        measurement: Optional[str] = None,
+    ) -> Dict[str, Dict[str, float]]:
         """
         Fit dose-response data at a specific timepoint to a Hill function.
 
@@ -997,7 +1113,9 @@ class SampleFrame:
 
         def hill_function(conc, ec50, hill, min_val, max_val):
             """Hill equation: response = min + (max - min) * conc^hill / (ec50^hill + conc^hill)"""
-            return min_val + (max_val - min_val) * (conc ** hill) / (ec50 ** hill + conc ** hill)
+            return min_val + (max_val - min_val) * (conc**hill) / (
+                ec50**hill + conc**hill
+            )
 
         fit_results = {}
 
@@ -1008,9 +1126,7 @@ class SampleFrame:
 
             sample = self.samples[sample_id]
 
-            fit_measurement = self._resolve_fold_change_measurement(
-                sample, measurement
-            )
+            fit_measurement = self._resolve_fold_change_measurement(sample, measurement)
             if fit_measurement is None:
                 logger.warning(f"No fold change data for {sample_id}")
                 continue
@@ -1030,8 +1146,8 @@ class SampleFrame:
 
             if concentration_idx_range is not None:
                 start_idx, end_idx = concentration_idx_range
-                concentrations = all_concentrations[start_idx:end_idx + 1]
-                fold_changes = all_fold_changes[start_idx:end_idx + 1]
+                concentrations = all_concentrations[start_idx : end_idx + 1]
+                fold_changes = all_fold_changes[start_idx : end_idx + 1]
             else:
                 concentrations = all_concentrations
                 fold_changes = all_fold_changes
@@ -1046,9 +1162,13 @@ class SampleFrame:
                 max_val = np.max(fold_changes)
                 ec50_guess = np.median(concentrations)
 
-                popt, _ = curve_fit(hill_function, concentrations, fold_changes,
-                                   p0=[ec50_guess, 1.0, min_val, max_val],
-                                   maxfev=5000)
+                popt, _ = curve_fit(
+                    hill_function,
+                    concentrations,
+                    fold_changes,
+                    p0=[ec50_guess, 1.0, min_val, max_val],
+                    maxfev=5000,
+                )
 
                 ec50, hill, min_fit, max_fit = popt
 
@@ -1059,11 +1179,11 @@ class SampleFrame:
                 r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
                 fit_results[sample_id] = {
-                    'ec50': float(ec50),
-                    'hill': float(hill),
-                    'min': float(min_fit),
-                    'max': float(max_fit),
-                    'r_squared': float(r_squared)
+                    "ec50": float(ec50),
+                    "hill": float(hill),
+                    "min": float(min_fit),
+                    "max": float(max_fit),
+                    "r_squared": float(r_squared),
                 }
             except Exception as e:
                 logger.warning(f"Hill fit failed for {sample_id}: {e}")
@@ -1076,9 +1196,14 @@ class SampleFrame:
 
         return fit_results
 
-    def _get_normalized_replicate_values(self, wells: List['Well'], blank: 'Sample',
-                                        measurement: str, od_measurement: str,
-                                        alpha: float) -> np.ndarray:
+    def _get_normalized_replicate_values(
+        self,
+        wells: List["Well"],
+        blank: "Sample",
+        measurement: str,
+        od_measurement: str,
+        alpha: float,
+    ) -> np.ndarray:
         """
         Calculate normalized values for a list of wells.
 
@@ -1098,8 +1223,8 @@ class SampleFrame:
 
         # Handle case where blank is None
         if blank is not None:
-            blank_measurement = blank.get_data(measurement, 'time_series')
-            blank_od = blank.get_data(od_measurement, 'time_series')
+            blank_measurement = blank.get_data(measurement, "time_series")
+            blank_od = blank.get_data(od_measurement, "time_series")
         else:
             blank_measurement = None
             blank_od = None
@@ -1133,7 +1258,9 @@ class SampleFrame:
             well_od = well.time_series.get(od_measurement)
 
             if well_measurement is None or well_od is None:
-                raise ValueError(f"Missing measurement or OD data in well {well.well_id}")
+                raise ValueError(
+                    f"Missing measurement or OD data in well {well.well_id}"
+                )
 
             # Blank subtract if available, otherwise use raw data
             if has_blank_data:
@@ -1148,22 +1275,27 @@ class SampleFrame:
             normalized_values.append(normalized)
 
         return np.array(normalized_values)
+
     def plot_fold_change_dose_response(self, timepoint_idx: int, **kwargs):
         """Plot dose-response curve. See :func:`fluoropy.core.plotting.plot_fold_change_dose_response`."""
         from .plotting import plot_fold_change_dose_response
+
         return plot_fold_change_dose_response(self, timepoint_idx, **kwargs)
 
     def plot_replicate_time_series(self, measurement: str, **kwargs):
         """Plot replicate time series. See :func:`fluoropy.core.plotting.plot_replicate_time_series`."""
         from .plotting import plot_replicate_time_series
+
         return plot_replicate_time_series(self, measurement, **kwargs)
 
     def plot_dose_response_with_hill_fit(self, timepoint_idx: int, **kwargs):
         """Plot dose-response with Hill fit. See :func:`fluoropy.core.plotting.plot_dose_response_with_hill_fit`."""
         from .plotting import plot_dose_response_with_hill_fit
+
         return plot_dose_response_with_hill_fit(self, timepoint_idx, **kwargs)
 
     def plot_mean_normalized_data(self, measurement: str, **kwargs):
         """Plot mean normalized data. See :func:`fluoropy.core.plotting.plot_mean_normalized_data`."""
         from .plotting import plot_mean_normalized_data
+
         return plot_mean_normalized_data(self, measurement, **kwargs)

@@ -13,15 +13,15 @@ Tests:
 """
 
 import sys
+import tempfile
+
 import numpy as np
 import pandas as pd
-import tempfile
 import pytest
 
-
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
 from fluoropy.core.sample import Sample
+from fluoropy.core.well import Well
 
 
 class TestWellMolecules:
@@ -55,14 +55,14 @@ class TestWellMolecules:
 
         well.set_sample_info(
             sample_type="test_sample",
-            inducers={'aTc': 200.0, 'IPTG': 0.5},
-            antibiotics={'Kan': 50.0, 'Chlor': 34.0},
-            other_modifications={'supplement': 1.0}
+            inducers={"aTc": 200.0, "IPTG": 0.5},
+            antibiotics={"Kan": 50.0, "Chlor": 34.0},
+            other_modifications={"supplement": 1.0},
         )
 
-        assert well.inducers == {'aTc': 200.0, 'IPTG': 0.5}
-        assert well.antibiotics == {'Kan': 50.0, 'Chlor': 34.0}
-        assert well.other_modifications == {'supplement': 1.0}
+        assert well.inducers == {"aTc": 200.0, "IPTG": 0.5}
+        assert well.antibiotics == {"Kan": 50.0, "Chlor": 34.0}
+        assert well.other_modifications == {"supplement": 1.0}
 
     def test_set_sample_info_with_units(self):
         """Test setting sample info with units"""
@@ -70,21 +70,21 @@ class TestWellMolecules:
 
         well.set_sample_info(
             sample_type="test_sample",
-            inducers={'aTc': 200.0},
-            antibiotics={'Kan': 50.0},
-            inducers_units={'aTc': 'ng/mL'},
-            antibiotics_units={'Kan': 'µg/mL'}
+            inducers={"aTc": 200.0},
+            antibiotics={"Kan": 50.0},
+            inducers_units={"aTc": "ng/mL"},
+            antibiotics_units={"Kan": "µg/mL"},
         )
 
-        assert well.inducers_units == {'aTc': 'ng/mL'}
-        assert well.antibiotics_units == {'Kan': 'µg/mL'}
+        assert well.inducers_units == {"aTc": "ng/mL"}
+        assert well.antibiotics_units == {"Kan": "µg/mL"}
 
     def test_concentration_hierarchy_explicit(self):
         """Test concentration hierarchy: explicit concentration (Priority 1)"""
         well = Well("A1", 0, 0)
 
         well.concentration = 100.0
-        well.inducers = {'aTc': 200.0}
+        well.inducers = {"aTc": 200.0}
         well._set_concentration()
 
         # Explicit concentration should be used
@@ -94,20 +94,20 @@ class TestWellMolecules:
         """Test concentration hierarchy: molecule of interest (Priority 2)"""
         well = Well("A1", 0, 0)
 
-        well.inducers = {'aTc': 200.0, 'IPTG': 0.5}
-        well.antibiotics = {'Kan': 50.0}
-        well.moi = 'IPTG'
+        well.inducers = {"aTc": 200.0, "IPTG": 0.5}
+        well.antibiotics = {"Kan": 50.0}
+        well.moi = "IPTG"
         well._set_concentration()
 
         # MOI should be used
         assert well.concentration == 0.5
-        assert well.moi == 'IPTG'
+        assert well.moi == "IPTG"
 
     def test_concentration_hierarchy_first_inducer(self):
         """Test concentration hierarchy: first inducer (Priority 3)"""
         well = Well("A1", 0, 0)
 
-        well.inducers = {'aTc': 200.0}
+        well.inducers = {"aTc": 200.0}
         well._set_concentration()
 
         # First inducer should be used
@@ -117,7 +117,7 @@ class TestWellMolecules:
         """Test concentration hierarchy: first antibiotic if no inducers"""
         well = Well("A1", 0, 0)
 
-        well.antibiotics = {'Kan': 50.0}
+        well.antibiotics = {"Kan": 50.0}
         well._set_concentration()
 
         # First antibiotic should be used
@@ -127,40 +127,40 @@ class TestWellMolecules:
         """Test set_concentration_molecule() method"""
         well = Well("A1", 0, 0)
 
-        well.inducers = {'aTc': 200.0, 'IPTG': 0.5}
-        well.antibiotics = {'Kan': 50.0}
+        well.inducers = {"aTc": 200.0, "IPTG": 0.5}
+        well.antibiotics = {"Kan": 50.0}
 
         # Set to inducer
-        well.set_concentration_molecule('IPTG')
+        well.set_concentration_molecule("IPTG")
         assert well.concentration == 0.5
-        assert well.moi == 'IPTG'
+        assert well.moi == "IPTG"
 
         # Change to antibiotic
-        well.set_concentration_molecule('Kan')
+        well.set_concentration_molecule("Kan")
         assert well.concentration == 50.0
-        assert well.moi == 'Kan'
+        assert well.moi == "Kan"
 
     def test_set_concentration_molecule_not_found(self):
         """Test set_concentration_molecule() raises error for unknown molecule"""
         well = Well("A1", 0, 0)
-        well.inducers = {'aTc': 200.0}
+        well.inducers = {"aTc": 200.0}
 
         with pytest.raises(ValueError, match="not found"):
-            well.set_concentration_molecule('Unknown')
+            well.set_concentration_molecule("Unknown")
 
     def test_condition_key_with_molecules(self):
         """Test condition_key property with molecule dicts"""
         well = Well("A1", 0, 0)
 
         well.medium = "LB"
-        well.inducers = {'aTc': 200.0}
-        well.antibiotics = {'Kan': 50.0}
+        well.inducers = {"aTc": 200.0}
+        well.antibiotics = {"Kan": 50.0}
 
         key = well.condition_key
 
         assert key[0] == "LB"
-        assert key[1] == frozenset([('Kan', 50.0)])
-        assert key[2] == frozenset([('aTc', 200.0)])
+        assert key[1] == frozenset([("Kan", 50.0)])
+        assert key[2] == frozenset([("aTc", 200.0)])
 
 
 class TestPlateMoleculeLayouts:
@@ -169,78 +169,87 @@ class TestPlateMoleculeLayouts:
     def create_test_csvs(self, tmpdir):
         """Create test CSV files for molecule layouts"""
         # Sample layout
-        sample_data = pd.DataFrame([
-            ['s1', 's1', 's2', 's2'],
-            ['s1', 's1', 's2', 's2'],
-            ['Blank', 'Blank', 'Blank', 'Blank']
-        ], index=['A', 'B', 'C'], columns=[1, 2, 3, 4])
+        sample_data = pd.DataFrame(
+            [
+                ["s1", "s1", "s2", "s2"],
+                ["s1", "s1", "s2", "s2"],
+                ["Blank", "Blank", "Blank", "Blank"],
+            ],
+            index=["A", "B", "C"],
+            columns=[1, 2, 3, 4],
+        )
         sample_path = tmpdir / "samples.csv"
         sample_data.to_csv(sample_path)
 
         # Inducer: aTc
-        atc_data = pd.DataFrame([
-            [200.0, 100.0, 200.0, 100.0],
-            [50.0, 25.0, 50.0, 25.0],
-            [0.0, 0.0, 0.0, 0.0]
-        ], index=['A', 'B', 'C'], columns=[1, 2, 3, 4])
+        atc_data = pd.DataFrame(
+            [
+                [200.0, 100.0, 200.0, 100.0],
+                [50.0, 25.0, 50.0, 25.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ],
+            index=["A", "B", "C"],
+            columns=[1, 2, 3, 4],
+        )
         atc_path = tmpdir / "atc.csv"
         atc_data.to_csv(atc_path)
 
         # Inducer: IPTG
-        iptg_data = pd.DataFrame([
-            [1.0, 0.5, 1.0, 0.5],
-            [0.1, 0.05, 0.1, 0.05],
-            [0.0, 0.0, 0.0, 0.0]
-        ], index=['A', 'B', 'C'], columns=[1, 2, 3, 4])
+        iptg_data = pd.DataFrame(
+            [[1.0, 0.5, 1.0, 0.5], [0.1, 0.05, 0.1, 0.05], [0.0, 0.0, 0.0, 0.0]],
+            index=["A", "B", "C"],
+            columns=[1, 2, 3, 4],
+        )
         iptg_path = tmpdir / "iptg.csv"
         iptg_data.to_csv(iptg_path)
 
         # Antibiotic: Kan
-        kan_data = pd.DataFrame([
-            [50.0, 50.0, 50.0, 50.0],
-            [50.0, 50.0, 50.0, 50.0],
-            [0.0, 0.0, 0.0, 0.0]
-        ], index=['A', 'B', 'C'], columns=[1, 2, 3, 4])
+        kan_data = pd.DataFrame(
+            [[50.0, 50.0, 50.0, 50.0], [50.0, 50.0, 50.0, 50.0], [0.0, 0.0, 0.0, 0.0]],
+            index=["A", "B", "C"],
+            columns=[1, 2, 3, 4],
+        )
         kan_path = tmpdir / "kan.csv"
         kan_data.to_csv(kan_path)
 
         # Antibiotic: Chlor
-        chlor_data = pd.DataFrame([
-            [34.0, 34.0, 34.0, 34.0],
-            [34.0, 34.0, 34.0, 34.0],
-            [0.0, 0.0, 0.0, 0.0]
-        ], index=['A', 'B', 'C'], columns=[1, 2, 3, 4])
+        chlor_data = pd.DataFrame(
+            [[34.0, 34.0, 34.0, 34.0], [34.0, 34.0, 34.0, 34.0], [0.0, 0.0, 0.0, 0.0]],
+            index=["A", "B", "C"],
+            columns=[1, 2, 3, 4],
+        )
         chlor_path = tmpdir / "chlor.csv"
         chlor_data.to_csv(chlor_path)
 
         # Media layout
-        media_data = pd.DataFrame([
-            ['LB', 'LB', 'LB', 'LB'],
-            ['LB', 'LB', 'LB', 'LB'],
-            ['LB', 'LB', 'LB', 'LB']
-        ], index=['A', 'B', 'C'], columns=[1, 2, 3, 4])
+        media_data = pd.DataFrame(
+            [
+                ["LB", "LB", "LB", "LB"],
+                ["LB", "LB", "LB", "LB"],
+                ["LB", "LB", "LB", "LB"],
+            ],
+            index=["A", "B", "C"],
+            columns=[1, 2, 3, 4],
+        )
         media_path = tmpdir / "media.csv"
         media_data.to_csv(media_path)
 
         # Plate reader data (minimal)
         data_dict = {
-            'OD600': np.random.rand(3, 4, 10) * 0.5,
-            'GFP': np.random.rand(3, 4, 10) * 1000
+            "OD600": np.random.rand(3, 4, 10) * 0.5,
+            "GFP": np.random.rand(3, 4, 10) * 1000,
         }
-        time_dict = {
-            'OD600': np.linspace(0, 5, 10),
-            'GFP': np.linspace(0, 5, 10)
-        }
+        time_dict = {"OD600": np.linspace(0, 5, 10), "GFP": np.linspace(0, 5, 10)}
 
         return {
-            'sample_path': str(sample_path),
-            'atc_path': str(atc_path),
-            'iptg_path': str(iptg_path),
-            'kan_path': str(kan_path),
-            'chlor_path': str(chlor_path),
-            'media_path': str(media_path),
-            'data_dict': data_dict,
-            'time_dict': time_dict
+            "sample_path": str(sample_path),
+            "atc_path": str(atc_path),
+            "iptg_path": str(iptg_path),
+            "kan_path": str(kan_path),
+            "chlor_path": str(chlor_path),
+            "media_path": str(media_path),
+            "data_dict": data_dict,
+            "time_dict": time_dict,
         }
 
     def test_plate_with_molecule_layouts(self, tmp_path):
@@ -251,21 +260,25 @@ class TestPlateMoleculeLayouts:
         plate = Plate(plate_format="96", name="test_plate")  # Use standard 96-well
 
         # Manually load arrays (simulating data file load)
-        sample_map = pd.read_csv(test_data['sample_path'], index_col=0).values
-        conc_map = pd.read_csv(test_data['atc_path'], index_col=0).values.astype(float)
+        sample_map = pd.read_csv(test_data["sample_path"], index_col=0).values
+        conc_map = pd.read_csv(test_data["atc_path"], index_col=0).values.astype(float)
 
         plate.load_from_arrays(
             sample_map=sample_map,
             conc_map=conc_map,
-            data_dict=test_data['data_dict'],
-            time_dict=test_data['time_dict']
+            data_dict=test_data["data_dict"],
+            time_dict=test_data["time_dict"],
         )
 
         # Now load molecule layouts manually
-        atc_grid = pd.read_csv(test_data['atc_path'], index_col=0).values.astype(float)
-        iptg_grid = pd.read_csv(test_data['iptg_path'], index_col=0).values.astype(float)
-        kan_grid = pd.read_csv(test_data['kan_path'], index_col=0).values.astype(float)
-        chlor_grid = pd.read_csv(test_data['chlor_path'], index_col=0).values.astype(float)
+        atc_grid = pd.read_csv(test_data["atc_path"], index_col=0).values.astype(float)
+        iptg_grid = pd.read_csv(test_data["iptg_path"], index_col=0).values.astype(
+            float
+        )
+        kan_grid = pd.read_csv(test_data["kan_path"], index_col=0).values.astype(float)
+        chlor_grid = pd.read_csv(test_data["chlor_path"], index_col=0).values.astype(
+            float
+        )
 
         # Populate wells
         for row in range(3):
@@ -273,42 +286,42 @@ class TestPlateMoleculeLayouts:
                 well_id = f"{chr(ord('A') + row)}{col + 1}"
                 well = plate[well_id]
 
-                well.inducers['aTc'] = float(atc_grid[row, col])
-                well.inducers['IPTG'] = float(iptg_grid[row, col])
-                well.antibiotics['Kan'] = float(kan_grid[row, col])
-                well.antibiotics['Chlor'] = float(chlor_grid[row, col])
+                well.inducers["aTc"] = float(atc_grid[row, col])
+                well.inducers["IPTG"] = float(iptg_grid[row, col])
+                well.antibiotics["Kan"] = float(kan_grid[row, col])
+                well.antibiotics["Chlor"] = float(chlor_grid[row, col])
 
-                well.inducers_units = {'aTc': 'ng/mL', 'IPTG': 'mM'}
-                well.antibiotics_units = {'Kan': 'µg/mL', 'Chlor': 'µg/mL'}
-                well.moi = 'aTc'
+                well.inducers_units = {"aTc": "ng/mL", "IPTG": "mM"}
+                well.antibiotics_units = {"Kan": "µg/mL", "Chlor": "µg/mL"}
+                well.moi = "aTc"
 
         # Test well A1
-        well_a1 = plate['A1']
-        assert well_a1.inducers == {'aTc': 200.0, 'IPTG': 1.0}
-        assert well_a1.antibiotics == {'Kan': 50.0, 'Chlor': 34.0}
-        assert well_a1.inducers_units == {'aTc': 'ng/mL', 'IPTG': 'mM'}
-        assert well_a1.antibiotics_units == {'Kan': 'µg/mL', 'Chlor': 'µg/mL'}
-        assert well_a1.moi == 'aTc'
+        well_a1 = plate["A1"]
+        assert well_a1.inducers == {"aTc": 200.0, "IPTG": 1.0}
+        assert well_a1.antibiotics == {"Kan": 50.0, "Chlor": 34.0}
+        assert well_a1.inducers_units == {"aTc": "ng/mL", "IPTG": "mM"}
+        assert well_a1.antibiotics_units == {"Kan": "µg/mL", "Chlor": "µg/mL"}
+        assert well_a1.moi == "aTc"
         assert well_a1.concentration == 200.0  # From conc_map
 
         # Test well B2
-        well_b2 = plate['B2']
-        assert well_b2.inducers['aTc'] == 25.0
-        assert well_b2.inducers['IPTG'] == 0.05
-        assert well_b2.antibiotics['Kan'] == 50.0
+        well_b2 = plate["B2"]
+        assert well_b2.inducers["aTc"] == 25.0
+        assert well_b2.inducers["IPTG"] == 0.05
+        assert well_b2.antibiotics["Kan"] == 50.0
 
     def test_concentration_priority_primary_molecule(self, tmp_path):
         """Test that primary_molecule sets the correct concentration"""
         well = Well("A1", 0, 0)
 
         # Simulate what Plate does when primary_molecule='IPTG'
-        well.inducers = {'aTc': 200.0, 'IPTG': 0.5}
-        well.antibiotics = {'Kan': 50.0}
-        well.moi = 'IPTG'
+        well.inducers = {"aTc": 200.0, "IPTG": 0.5}
+        well.antibiotics = {"Kan": 50.0}
+        well.moi = "IPTG"
         well.concentration = 0.5  # Set by Plate based on primary_molecule
 
         assert well.concentration == 0.5
-        assert well.moi == 'IPTG'
+        assert well.moi == "IPTG"
 
     def test_units_separated_from_names(self):
         """Test that molecule names don't include units"""
@@ -318,12 +331,12 @@ class TestPlateMoleculeLayouts:
         # well.inducers = {'aTc_ng_mL': 200.0}  # WRONG
 
         # New style (units separate)
-        well.inducers = {'aTc': 200.0}  # Correct
-        well.inducers_units = {'aTc': 'ng/mL'}  # Correct
+        well.inducers = {"aTc": 200.0}  # Correct
+        well.inducers_units = {"aTc": "ng/mL"}  # Correct
 
-        assert 'aTc' in well.inducers
-        assert 'aTc_ng_mL' not in well.inducers
-        assert well.inducers_units['aTc'] == 'ng/mL'
+        assert "aTc" in well.inducers
+        assert "aTc_ng_mL" not in well.inducers
+        assert well.inducers_units["aTc"] == "ng/mL"
 
 
 class TestConditionKey:
@@ -333,13 +346,13 @@ class TestConditionKey:
         """Test that wells with same conditions have same key"""
         well1 = Well("A1", 0, 0)
         well1.medium = "LB"
-        well1.inducers = {'aTc': 200.0}
-        well1.antibiotics = {'Kan': 50.0}
+        well1.inducers = {"aTc": 200.0}
+        well1.antibiotics = {"Kan": 50.0}
 
         well2 = Well("B2", 1, 1)
         well2.medium = "LB"
-        well2.inducers = {'aTc': 200.0}
-        well2.antibiotics = {'Kan': 50.0}
+        well2.inducers = {"aTc": 200.0}
+        well2.antibiotics = {"Kan": 50.0}
 
         assert well1.condition_key == well2.condition_key
 
@@ -347,11 +360,11 @@ class TestConditionKey:
         """Test that wells with different conditions have different keys"""
         well1 = Well("A1", 0, 0)
         well1.medium = "LB"
-        well1.inducers = {'aTc': 200.0}
+        well1.inducers = {"aTc": 200.0}
 
         well2 = Well("B2", 1, 1)
         well2.medium = "LB"
-        well2.inducers = {'aTc': 100.0}  # Different concentration
+        well2.inducers = {"aTc": 100.0}  # Different concentration
 
         assert well1.condition_key != well2.condition_key
 
@@ -376,9 +389,9 @@ class TestSampleConditionKey:
         sample = Sample(name="test_sample")
         sample.medium = "LB"
         sample.plate_id = "plate1"
-        sample.antibiotics = {'Kan': np.array([50.0, 50.0])}
-        sample.inducers = {'aTc': np.array([200.0, 200.0])}
-        sample.other_modifications = {'supplement': np.array([1.0, 1.0])}
+        sample.antibiotics = {"Kan": np.array([50.0, 50.0])}
+        sample.inducers = {"aTc": np.array([200.0, 200.0])}
+        sample.other_modifications = {"supplement": np.array([1.0, 1.0])}
 
         key = sample.condition_key
 
@@ -394,14 +407,14 @@ class TestSampleConditionKey:
         sample1 = Sample(name="sample1")
         sample1.medium = "LB"
         sample1.plate_id = "plate1"
-        sample1.antibiotics = {'Kan': np.array([50.0, 50.0])}
-        sample1.inducers = {'aTc': np.array([200.0, 200.0])}
+        sample1.antibiotics = {"Kan": np.array([50.0, 50.0])}
+        sample1.inducers = {"aTc": np.array([200.0, 200.0])}
 
         sample2 = Sample(name="sample2")
         sample2.medium = "LB"
         sample2.plate_id = "plate1"
-        sample2.antibiotics = {'Kan': np.array([50.0, 50.0])}
-        sample2.inducers = {'aTc': np.array([200.0, 200.0])}
+        sample2.antibiotics = {"Kan": np.array([50.0, 50.0])}
+        sample2.inducers = {"aTc": np.array([200.0, 200.0])}
 
         assert sample1.condition_key == sample2.condition_key
 
@@ -410,12 +423,12 @@ class TestSampleConditionKey:
         sample1 = Sample(name="sample1")
         sample1.medium = "LB"
         sample1.plate_id = "plate1"
-        sample1.inducers = {'aTc': np.array([200.0, 200.0])}
+        sample1.inducers = {"aTc": np.array([200.0, 200.0])}
 
         sample2 = Sample(name="sample2")
         sample2.medium = "LB"
         sample2.plate_id = "plate1"
-        sample2.inducers = {'aTc': np.array([100.0, 100.0])}  # Different
+        sample2.inducers = {"aTc": np.array([100.0, 100.0])}  # Different
 
         assert sample1.condition_key != sample2.condition_key
 
@@ -424,9 +437,9 @@ class TestSampleConditionKey:
         sample = Sample(name="test_sample")
         sample.medium = "LB"
         sample.plate_id = "plate1"
-        sample.antibiotics = {'Kan': np.array([50.0, 50.0])}
-        sample.inducers = {'aTc': np.array([200.0, 200.0])}
-        sample.other_modifications = {'supplement': np.array([1.0, 1.0])}
+        sample.antibiotics = {"Kan": np.array([50.0, 50.0])}
+        sample.inducers = {"aTc": np.array([200.0, 200.0])}
+        sample.other_modifications = {"supplement": np.array([1.0, 1.0])}
 
         key = sample.condition_key_no_inducers()
 
@@ -459,11 +472,8 @@ class TestSampleConditionKey:
 def run_tests():
     """Run all tests"""
     import subprocess
-    result = subprocess.run(
-        ['pytest', __file__, '-v'],
-        capture_output=True,
-        text=True
-    )
+
+    result = subprocess.run(["pytest", __file__, "-v"], capture_output=True, text=True)
     print(result.stdout)
     print(result.stderr)
     return result.returncode

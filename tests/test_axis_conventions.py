@@ -35,11 +35,13 @@ def frame():
             well.plate_id = "P1"
             # Replicates differ so an average over the wrong axis is visible.
             well.add_time_series(
-                "OD600", np.linspace(0.1, 0.5, N_TIMEPOINTS) * (1 + conc) + rep * 0.01,
+                "OD600",
+                np.linspace(0.1, 0.5, N_TIMEPOINTS) * (1 + conc) + rep * 0.01,
                 TIMES,
             )
             well.add_time_series(
-                "GFP", np.linspace(100, 500, N_TIMEPOINTS) * (1 + conc) + rep * 7.0,
+                "GFP",
+                np.linspace(100, 500, N_TIMEPOINTS) * (1 + conc) + rep * 7.0,
                 TIMES,
             )
 
@@ -114,6 +116,7 @@ def test_mean_columns_still_match_the_concentration_labels(frame):
 # calculate_fold_change_statistics over dict data
 # ---------------------------------------------------------------------------
 
+
 def test_fold_change_statistics_reduces_3d_dicts(frame):
     """
     Regression: this used to require ndim == 2, so the 3-D arrays that actually
@@ -142,8 +145,8 @@ def test_fold_change_statistics_averages_replicates_not_concentrations(frame):
     frame.calculate_fold_change_statistics("blanked_data", error_type="sem")
 
     expected_mean = np.nanmean(sample.blanked_data["GFP"], axis=1)
-    expected_sem = (
-        np.nanstd(sample.blanked_data["GFP"], axis=1, ddof=1) / np.sqrt(N_REPLICATES)
+    expected_sem = np.nanstd(sample.blanked_data["GFP"], axis=1, ddof=1) / np.sqrt(
+        N_REPLICATES
     )
 
     assert np.allclose(sample.blanked_data_mean["GFP"], expected_mean)
@@ -161,9 +164,7 @@ def test_fold_change_is_timepoint_major_like_everything_else(frame):
 
     fold_change = sample.fold_change["GFP"]
     # Zero concentration is the reference, so it is not itself a fold change.
-    assert fold_change.shape == (
-        N_TIMEPOINTS, N_REPLICATES, N_CONCENTRATIONS - 1
-    )
+    assert fold_change.shape == (N_TIMEPOINTS, N_REPLICATES, N_CONCENTRATIONS - 1)
 
 
 def test_fold_change_concentrations_label_the_last_axis(frame):

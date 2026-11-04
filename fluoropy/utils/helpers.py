@@ -2,13 +2,15 @@
 General helper utilities for fluoropy package.
 """
 
-from typing import List, Union
 import string
+from typing import List, Union
+
 import numpy as np
 
 
-def generate_well_positions(plate_format: str = "96",
-                           row_wise: bool = True) -> List[str]:
+def generate_well_positions(
+    plate_format: str = "96", row_wise: bool = True
+) -> List[str]:
     """
     Generate all well positions for a given plate format.
 
@@ -33,11 +35,7 @@ def generate_well_positions(plate_format: str = "96",
     >>> positions[:3]
     ['A1', 'A2', 'A3']
     """
-    dimensions = {
-        "96": (8, 12),
-        "384": (16, 24),
-        "1536": (32, 48)
-    }
+    dimensions = {"96": (8, 12), "384": (16, 24), "1536": (32, 48)}
 
     if plate_format not in dimensions:
         raise ValueError(f"Unsupported plate format: {plate_format}")
@@ -88,8 +86,9 @@ def parse_plate_format(plate_format: Union[str, int]) -> str:
 
     valid_formats = ["96", "384", "1536"]
     if plate_format not in valid_formats:
-        raise ValueError(f"Invalid plate format: {plate_format}. "
-                        f"Valid formats: {valid_formats}")
+        raise ValueError(
+            f"Invalid plate format: {plate_format}. " f"Valid formats: {valid_formats}"
+        )
 
     return plate_format
 

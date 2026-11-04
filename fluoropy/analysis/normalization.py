@@ -19,11 +19,14 @@ from ._extract import resolve_controls, well_values
 _MAD_TO_SIGMA = 1.4826
 
 
-def normalize_to_controls(plate, measurement: str,
-                          test_wells: List[str],
-                          positive_controls: Optional[List[str]] = None,
-                          negative_controls: Optional[List[str]] = None,
-                          timepoint_idx: int = -1) -> Dict[str, float]:
+def normalize_to_controls(
+    plate,
+    measurement: str,
+    test_wells: List[str],
+    positive_controls: Optional[List[str]] = None,
+    negative_controls: Optional[List[str]] = None,
+    timepoint_idx: int = -1,
+) -> Dict[str, float]:
     """
     Express each test well as a percentage of the control window.
 
@@ -86,10 +89,13 @@ def normalize_to_controls(plate, measurement: str,
     }
 
 
-def percent_inhibition(plate, measurement: str,
-                       test_wells: List[str],
-                       control_wells: Optional[List[str]] = None,
-                       timepoint_idx: int = -1) -> Dict[str, float]:
+def percent_inhibition(
+    plate,
+    measurement: str,
+    test_wells: List[str],
+    control_wells: Optional[List[str]] = None,
+    timepoint_idx: int = -1,
+) -> Dict[str, float]:
     """
     Percent reduction relative to uninhibited controls.
 
@@ -133,9 +139,12 @@ def percent_inhibition(plate, measurement: str,
     }
 
 
-def robust_z_score(plate, measurement: str,
-                   well_list: Optional[List[str]] = None,
-                   timepoint_idx: int = -1) -> Dict[str, float]:
+def robust_z_score(
+    plate,
+    measurement: str,
+    well_list: Optional[List[str]] = None,
+    timepoint_idx: int = -1,
+) -> Dict[str, float]:
     """
     Median/MAD-based z-score.
 

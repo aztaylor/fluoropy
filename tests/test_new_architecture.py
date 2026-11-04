@@ -9,8 +9,9 @@ Tests the separation of concerns:
 - SampleFrame: Indexable sample collection
 """
 
-import numpy as np
 import traceback
+
+import numpy as np
 
 
 def test_new_architecture():
@@ -21,7 +22,8 @@ def test_new_architecture():
     # Test imports
     try:
         print("Testing imports...")
-        from fluoropy.core import Plate, Well, Sample, SampleFrame
+        from fluoropy.core import Plate, Sample, SampleFrame, Well
+
         print("✅ Successfully imported: Plate, Well, Sample, SampleFrame")
     except ImportError as e:
         print(f"❌ Import error: {e}")
@@ -39,16 +41,16 @@ def test_new_architecture():
     print(f"   Plate has {len(plate)} wells")
 
     # Test well access
-    well_a1 = plate['A1']
+    well_a1 = plate["A1"]
     print(f"   Well A1: {well_a1}")
     print(f"   Well A1 ID: {well_a1.well_id}")
 
     # Test 2: Set sample info in wells
     print("\n🧬 Test 2: Setting Sample Information")
-    plate['A1'].set_sample_info("sample_1", concentration=10.0)
-    plate['A2'].set_sample_info("sample_1", concentration=10.0)  # Replicate
-    plate['A3'].set_sample_info("sample_1", concentration=5.0)
-    plate['B1'].set_sample_info("sample_2", concentration=10.0)
+    plate["A1"].set_sample_info("sample_1", concentration=10.0)
+    plate["A2"].set_sample_info("sample_1", concentration=10.0)  # Replicate
+    plate["A3"].set_sample_info("sample_1", concentration=5.0)
+    plate["B1"].set_sample_info("sample_2", concentration=10.0)
 
     print(f"   A1: {plate['A1'].sample_type} at {plate['A1'].concentration}")
     print(f"   A2: {plate['A2'].sample_type} at {plate['A2'].concentration}")
@@ -60,16 +62,22 @@ def test_new_architecture():
     time_points = np.array([0, 30, 60, 90, 120])  # minutes
 
     # Add OD600 data
-    plate['A1'].add_time_series("OD600", [0.1, 0.15, 0.25, 0.35, 0.45], time_points)
-    plate['A2'].add_time_series("OD600", [0.11, 0.16, 0.24, 0.34, 0.44], time_points)  # Replicate with slight variation
-    plate['A3'].add_time_series("OD600", [0.1, 0.12, 0.18, 0.28, 0.38], time_points)  # Different concentration
-    plate['B1'].add_time_series("OD600", [0.1, 0.14, 0.22, 0.32, 0.42], time_points)  # Different sample
+    plate["A1"].add_time_series("OD600", [0.1, 0.15, 0.25, 0.35, 0.45], time_points)
+    plate["A2"].add_time_series(
+        "OD600", [0.11, 0.16, 0.24, 0.34, 0.44], time_points
+    )  # Replicate with slight variation
+    plate["A3"].add_time_series(
+        "OD600", [0.1, 0.12, 0.18, 0.28, 0.38], time_points
+    )  # Different concentration
+    plate["B1"].add_time_series(
+        "OD600", [0.1, 0.14, 0.22, 0.32, 0.42], time_points
+    )  # Different sample
 
     # Add GFP data
-    plate['A1'].add_time_series("GFP", [100, 150, 250, 350, 450], time_points)
-    plate['A2'].add_time_series("GFP", [105, 155, 245, 345, 440], time_points)
-    plate['A3'].add_time_series("GFP", [80, 120, 180, 280, 380], time_points)
-    plate['B1'].add_time_series("GFP", [90, 140, 220, 320, 420], time_points)
+    plate["A1"].add_time_series("GFP", [100, 150, 250, 350, 450], time_points)
+    plate["A2"].add_time_series("GFP", [105, 155, 245, 345, 440], time_points)
+    plate["A3"].add_time_series("GFP", [80, 120, 180, 280, 380], time_points)
+    plate["B1"].add_time_series("GFP", [90, 140, 220, 320, 420], time_points)
 
     print(f"   A1 OD600 final: {plate['A1'].time_series['OD600'][-1]}")
     print(f"   A1 GFP final: {plate['A1'].time_series['GFP'][-1]}")
@@ -80,8 +88,8 @@ def test_new_architecture():
     print("\n🔬 Test 4: Creating Sample Objects for Statistics")
 
     # Get all wells for sample_1 (includes both concentrations: 10.0 and 5.0)
-    sample1_wells = [plate['A1'], plate['A2'], plate['A3']]  # A1,A2: 10.0, A3: 5.0
-    sample2_wells = [plate['B1']]  # B1: 10.0
+    sample1_wells = [plate["A1"], plate["A2"], plate["A3"]]  # A1,A2: 10.0, A3: 5.0
+    sample2_wells = [plate["B1"]]  # B1: 10.0
 
     # Create Sample objects (groups all concentrations for each sample_type)
     sample1 = Sample("sample_1", sample1_wells)
@@ -96,7 +104,9 @@ def test_new_architecture():
 
     print(f"   Sample 1 concentrations: {sample1.concentrations}")
     print(f"   Sample 1 OD600 array shape: {sample1.time_series['OD600'].shape}")
-    print(f"   Sample 1 OD600 final values: {sample1.time_series['OD600'][-1, :]}")  # Last timepoint, all concentrations
+    print(
+        f"   Sample 1 OD600 final values: {sample1.time_series['OD600'][-1, :]}"
+    )  # Last timepoint, all concentrations
     print(f"   Sample 2 concentrations: {sample2.concentrations}")
     print(f"   Sample 2 OD600 array shape: {sample2.time_series['OD600'].shape}")
 
@@ -117,18 +127,20 @@ def test_new_architecture():
     print(f"   Retrieved sample_1: {retrieved_sample.name}")
     print(f"   Concentrations: {retrieved_sample.concentrations}")
     print(f"   OD600 array shape: {retrieved_sample.time_series['OD600'].shape}")
-    print(f"   Final OD600 values: {retrieved_sample.time_series['OD600'][-1, :]}")  # All concentrations at final timepoint
+    print(
+        f"   Final OD600 values: {retrieved_sample.time_series['OD600'][-1, :]}"
+    )  # All concentrations at final timepoint
 
     # Test 6: Process all data in SampleFrame
     print("\n⚙️ Test 6: Processing Pipeline in SampleFrame")
 
     # Set blank wells (normally you'd have actual blanks)
-    plate['H12'].set_sample_info("Blank", concentration=0.0, is_blank=True)
-    plate['H12'].add_time_series("OD600", [0.05, 0.05, 0.05, 0.05, 0.05], time_points)
-    plate['H12'].add_time_series("GFP", [50, 50, 50, 50, 50], time_points)
+    plate["H12"].set_sample_info("Blank", concentration=0.0, is_blank=True)
+    plate["H12"].add_time_series("OD600", [0.05, 0.05, 0.05, 0.05, 0.05], time_points)
+    plate["H12"].add_time_series("GFP", [50, 50, 50, 50, 50], time_points)
 
     # Create a blank sample and add it to the frame
-    blank_sample = Sample("Blank", [plate['H12']])
+    blank_sample = Sample("Blank", [plate["H12"]])
     blank_sample.calculate_statistics()
     frame.samples["Blank"] = blank_sample
 
@@ -147,9 +159,7 @@ def test_new_architecture():
     # Processed arrays keep the raw replicate shape:
     # (n_timepoints, n_replicates, n_concentrations)
     assert sample_1.blanked_data["OD600"].shape == sample_1.time_series["OD600"].shape
-    assert (
-        sample_1.normalized_data["GFP"].shape == sample_1.time_series["GFP"].shape
-    )
+    assert sample_1.normalized_data["GFP"].shape == sample_1.time_series["GFP"].shape
     print(f"   Sample 1 blanked data shape: {sample_1.blanked_data['OD600'].shape}")
 
     print("\n🎉 All tests passed! New architecture is working correctly.")
@@ -157,7 +167,9 @@ def test_new_architecture():
     print("   • Well: Simple data container ✅")
     print("   • Plate: Well organization container ✅")
     print("   • Sample: Groups all concentrations for a sample_type ✅")
-    print("     - time_series[measurement] = numpy array (n_timepoints, n_concentrations) ✅")
+    print(
+        "     - time_series[measurement] = numpy array (n_timepoints, n_concentrations) ✅"
+    )
     print("     - error[measurement] = numpy array (n_timepoints, n_concentrations) ✅")
     print("   • SampleFrame: Indexable sample collection with processing pipeline ✅")
 

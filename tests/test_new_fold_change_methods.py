@@ -4,14 +4,15 @@ Test the new fold change calculation methods with synthetic data.
 
 import numpy as np
 import pandas as pd
+
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
 from fluoropy.core.sampleframe import SampleFrame
+from fluoropy.core.well import Well
 
 
-def create_synthetic_plate(plate_name='TestPlate'):
+def create_synthetic_plate(plate_name="TestPlate"):
     """Create a synthetic plate with test data."""
-    plate = Plate(plate_format='96', name=plate_name)
+    plate = Plate(plate_format="96", name=plate_name)
 
     # Time points
     time_points = np.linspace(0, 24, 25)  # 0-24 hours, 25 measurements
@@ -29,16 +30,22 @@ def create_synthetic_plate(plate_name='TestPlate'):
         """Generate synthetic GFP data."""
         base_gfp = 100 + 500 * (1 - np.exp(-0.15 * time_points))
         noise = np.random.normal(0, replicate_noise * base_gfp[-1], n_timepoints)
-        return base_gfp * (1 + 0.5 * conc) + noise  # Concentration increases fluorescence
+        return (
+            base_gfp * (1 + 0.5 * conc) + noise
+        )  # Concentration increases fluorescence
 
     # Blank wells (media only, no cells)
     blank_wells = []
     for row in range(2):  # A-B rows
         for col in range(3):  # Columns 1-3
             well = plate.get_well_by_position(row, col)
-            well.set_sample_info('blank', concentration=0.0, medium='LB', is_blank=True)
-            well.add_time_series('OD600', 0.05 + np.random.normal(0, 0.01, n_timepoints), time_points)
-            well.add_time_series('GFP', 10 + np.random.normal(0, 2, n_timepoints), time_points)
+            well.set_sample_info("blank", concentration=0.0, medium="LB", is_blank=True)
+            well.add_time_series(
+                "OD600", 0.05 + np.random.normal(0, 0.01, n_timepoints), time_points
+            )
+            well.add_time_series(
+                "GFP", 10 + np.random.normal(0, 2, n_timepoints), time_points
+            )
             blank_wells.append(well)
 
     # Negative control (no sample, just medium + cells at zero concentration)
@@ -47,15 +54,17 @@ def create_synthetic_plate(plate_name='TestPlate'):
     for row in range(3, 5):  # C-D rows
         for col in range(3):  # Columns 1-3
             well = plate.get_well_by_position(row, col)
-            well.set_sample_info('neg_control', concentration=conc_zero, medium='LB', is_control=True)
-            well.add_time_series('OD600', synthetic_od(conc_zero, 0.03), time_points)
-            well.add_time_series('GFP', 50 + np.random.normal(0, 5, n_timepoints), time_points)
+            well.set_sample_info(
+                "neg_control", concentration=conc_zero, medium="LB", is_control=True
+            )
+            well.add_time_series("OD600", synthetic_od(conc_zero, 0.03), time_points)
+            well.add_time_series(
+                "GFP", 50 + np.random.normal(0, 5, n_timepoints), time_points
+            )
             control_wells.append(well)
 
     # Test sample at different concentrations
-    sample_data = {
-        'sample1': [0.0, 0.5, 1.0]  # Zero and two non-zero concentrations
-    }
+    sample_data = {"sample1": [0.0, 0.5, 1.0]}  # Zero and two non-zero concentrations
 
     row_idx = 5
     for sample_name, concentrations in sample_data.items():
@@ -65,9 +74,9 @@ def create_synthetic_plate(plate_name='TestPlate'):
                 if row_idx >= 8:  # Don't exceed 8 rows
                     break
                 well = plate.get_well_by_position(row_idx, col_idx)
-                well.set_sample_info(sample_name, concentration=conc, medium='LB')
-                well.add_time_series('OD600', synthetic_od(conc, 0.03), time_points)
-                well.add_time_series('GFP', synthetic_gfp(conc, 0.08), time_points)
+                well.set_sample_info(sample_name, concentration=conc, medium="LB")
+                well.add_time_series("OD600", synthetic_od(conc, 0.03), time_points)
+                well.add_time_series("GFP", synthetic_gfp(conc, 0.08), time_points)
                 col_idx += 1
             row_idx += 1 if col_idx > 0 else 0
 
@@ -106,7 +115,7 @@ def test_fold_change_workflow():
     # Step 0: Calculate statistics (REQUIRED for time_series data to exist)
     print("\n3a. Calculating replicate statistics (mean/std across wells)...")
     for sample in frame.samples.values():
-        sample.calculate_statistics(['OD600', 'GFP'], error_type='std')
+        sample.calculate_statistics(["OD600", "GFP"], error_type="std")
     print("   ✓ Done")
 
     # Step 0b: Individual replicate time series data already populated during Sample init
@@ -120,39 +129,49 @@ def test_fold_change_workflow():
             print(f"   {sample_id}:")
             for measurement, data in sample.time_series.items():
                 n_timepoints, n_replicates, n_concentrations = data.shape
-                print(f"     {measurement}: shape {data.shape} ({n_timepoints} timepoints, {n_replicates} replicates, {n_concentrations} concentrations)")
+                print(
+                    f"     {measurement}: shape {data.shape} ({n_timepoints} timepoints, {n_replicates} replicates, {n_concentrations} concentrations)"
+                )
 
     # Step 1: Blank-subtracted timeseries
     print("\n4. Calculating blank-subtracted timeseries...")
-    frame.calculate_blank_subtracted_timeseries(['OD600', 'GFP'])
+    frame.calculate_blank_subtracted_timeseries(["OD600", "GFP"])
     print("   ✓ Done")
 
     # Check results
     for sample_id, sample in frame.samples.items():
-        if hasattr(sample, 'blank_subtracted_timeseries'):
-            print(f"   {sample_id}: blank_subtracted_timeseries = {list(sample.blank_subtracted_timeseries.keys())}")
+        if hasattr(sample, "blank_subtracted_timeseries"):
+            print(
+                f"   {sample_id}: blank_subtracted_timeseries = {list(sample.blank_subtracted_timeseries.keys())}"
+            )
 
     # Step 2: Normalized timeseries
     print("\n5. Calculating normalized timeseries (GFP / (0.01 + OD600))...")
-    frame.calculate_normalized_timeseries(od_measurement='OD600', alpha=0.01, measurement_types=['GFP'])
+    frame.calculate_normalized_timeseries(
+        od_measurement="OD600", alpha=0.01, measurement_types=["GFP"]
+    )
     print("   ✓ Done")
 
     # Check results
     for sample_id, sample in frame.samples.items():
-        if hasattr(sample, 'normalized_timeseries'):
-            print(f"   {sample_id}: normalized_timeseries = {list(sample.normalized_timeseries.keys())}")
+        if hasattr(sample, "normalized_timeseries"):
+            print(
+                f"   {sample_id}: normalized_timeseries = {list(sample.normalized_timeseries.keys())}"
+            )
 
     # Step 3: Fold change
-    print("\n6. Calculating fold change (sample / negative_control) for each replicate...")
-    frame.calculate_fold_change(measurement='GFP', od_measurement='OD600', alpha=0.01)
+    print(
+        "\n6. Calculating fold change (sample / negative_control) for each replicate..."
+    )
+    frame.calculate_fold_change(measurement="GFP", od_measurement="OD600", alpha=0.01)
     print("   ✓ Done")
 
     # Fold change follows the package layout: a dict keyed by measurement
     # holding (timepoints, replicates, concentrations), like time_series.
-    sample = frame['sample1']
-    assert 'GFP' in sample.fold_change
+    sample = frame["sample1"]
+    assert "GFP" in sample.fold_change
 
-    fold_change = sample.fold_change['GFP']
+    fold_change = sample.fold_change["GFP"]
     assert fold_change.ndim == 3
 
     n_timepoints, _, n_concentrations = fold_change.shape
@@ -167,24 +186,26 @@ def test_fold_change_workflow():
 
     # Step 4: Calculate statistics
     print("\n8. Calculating fold change statistics (mean and std across replicates)...")
-    frame.calculate_fold_change_statistics(data_attribute='fold_change', error_type='std')
+    frame.calculate_fold_change_statistics(
+        data_attribute="fold_change", error_type="std"
+    )
     print("   ✓ Done")
 
     # Reducing drops the replicate axis, as everywhere else.
-    mean = sample.fold_change_mean['GFP']
-    error = sample.fold_change_error['GFP']
+    mean = sample.fold_change_mean["GFP"]
+    error = sample.fold_change_error["GFP"]
     assert mean.shape == (n_timepoints, n_concentrations)
     assert error.shape == mean.shape
     assert np.allclose(mean, np.nanmean(fold_change, axis=1), equal_nan=True)
 
     # The dose-response slice lines values up with their labels.
-    concs_at_t, values, errors = sample.fold_change_at_timepoint('GFP', -1)
+    concs_at_t, values, errors = sample.fold_change_at_timepoint("GFP", -1)
     assert len(concs_at_t) == len(values) == len(errors) == n_concentrations
     assert np.allclose(values, mean[-1], equal_nan=True)
 
     # The tabular view is still available for export.
-    table = sample.fold_change_dataframe('GFP')
-    assert list(table.index.names) == ['concentration', 'replicate']
+    table = sample.fold_change_dataframe("GFP")
+    assert list(table.index.names) == ["concentration", "replicate"]
     assert table.shape[1] == n_timepoints
 
     print("\n" + "=" * 70)
@@ -192,5 +213,5 @@ def test_fold_change_workflow():
     print("=" * 70)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_fold_change_workflow()

@@ -6,10 +6,11 @@ sample information, time series data, and metadata management.
 """
 
 import sys
+
 import numpy as np
 
-
 from fluoropy.core.well import Well
+
 
 def test_well_initialization():
     """Test basic well initialization"""
@@ -30,6 +31,7 @@ def test_well_initialization():
 
     print("✅ Well initialization test passed")
 
+
 def test_sample_info_setting():
     """Test setting sample information.
 
@@ -48,7 +50,7 @@ def test_sample_info_setting():
         strain_modifications=["Kan50", "Chlor34"],
         antibiotics={"Kan": 50.0, "Chlor": 34.0},
         is_blank=False,
-        is_control=False
+        is_control=False,
     )
 
     assert well.sample_type == "s14"
@@ -59,6 +61,7 @@ def test_sample_info_setting():
     assert well.is_control is False
 
     print(f"✅ Sample info set correctly: {well}")
+
 
 def test_time_series_data():
     """Test adding and retrieving time series data"""
@@ -88,6 +91,7 @@ def test_time_series_data():
 
     print("✅ Time series data test passed")
 
+
 def test_well_exclusion():
     """Test well exclusion functionality"""
     print("\nTesting Well Exclusion...")
@@ -113,6 +117,7 @@ def test_well_exclusion():
 
     print("✅ Well exclusion test passed")
 
+
 def test_metadata():
     """Test metadata handling"""
     print("\nTesting Metadata...")
@@ -129,6 +134,7 @@ def test_metadata():
     assert well.metadata["plate_batch"] == "batch_001"
 
     print("✅ Metadata test passed")
+
 
 def test_well_repr():
     """Test well string representation"""

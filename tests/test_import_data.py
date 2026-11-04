@@ -1,7 +1,9 @@
 """Tests for import_data utility."""
+
 import io
-import tempfile
 import os
+import tempfile
+
 import numpy as np
 import pytest
 
@@ -10,13 +12,17 @@ from fluoropy.utils.import_data import import_results
 
 def _write_temp_file(content: str) -> str:
     """Write content to a temp file and return its path."""
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="iso-8859-1")
+    f = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="iso-8859-1"
+    )
     f.write(content)
     f.close()
     return f.name
 
 
-def _make_gen5_txt(read_label: str, rows: int, cols: int, timepoints: list, with_time_header: bool) -> str:
+def _make_gen5_txt(
+    read_label: str, rows: int, cols: int, timepoints: list, with_time_header: bool
+) -> str:
     """Generate a minimal Gen5-style txt file."""
     well_headers = "\t".join(
         f"{chr(65 + r)}{c + 1}" for r in range(rows) for c in range(cols)
@@ -41,7 +47,14 @@ def test_import_results_without_time_header():
     content = _make_gen5_txt("600", 1, 4, TIMEPOINTS, with_time_header=False)
     path = _write_temp_file(content)
     try:
-        data, time, _ = import_results(path, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
+        data, time, _ = import_results(
+            path,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
         assert "600" in data
         assert data["600"].shape == (1, 4, 2)
         assert time["600"].shape == (2, 1)
@@ -54,7 +67,14 @@ def test_import_results_with_time_header():
     content = _make_gen5_txt("600", 1, 4, TIMEPOINTS, with_time_header=True)
     path = _write_temp_file(content)
     try:
-        data, time, _ = import_results(path, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
+        data, time, _ = import_results(
+            path,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
         assert "600" in data
         assert data["600"].shape == (1, 4, 2)
         # First timepoint values should be 1.0, 2.0, 3.0, 4.0
@@ -72,8 +92,22 @@ def test_time_header_does_not_increment_timepoint():
     path_with = _write_temp_file(content_with)
     path_without = _write_temp_file(content_without)
     try:
-        data_with, time_with, _ = import_results(path_with, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
-        data_without, time_without, _ = import_results(path_without, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
+        data_with, time_with, _ = import_results(
+            path_with,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
+        data_without, time_without, _ = import_results(
+            path_without,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
         np.testing.assert_array_equal(data_with["600"], data_without["600"])
         np.testing.assert_array_equal(time_with["600"], time_without["600"])
     finally:

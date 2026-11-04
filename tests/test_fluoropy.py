@@ -1,5 +1,7 @@
 """Tests for fluoropy package."""
+
 import pytest
+
 from fluoropy import __version__
 
 
@@ -11,4 +13,5 @@ def test_version():
 def test_import():
     """Test that the package can be imported."""
     import fluoropy
+
     assert fluoropy is not None

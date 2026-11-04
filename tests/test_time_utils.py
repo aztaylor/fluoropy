@@ -9,13 +9,14 @@ from fluoropy.core.sample import Sample
 from fluoropy.core.sampleframe import SampleFrame
 from fluoropy.utils.time_utils import align_replicates_by_od
 
-
 # ---------------------------------------------------------------------------
 # Helpers to build minimal Sample / SampleFrame objects without real plates
 # ---------------------------------------------------------------------------
 
-def _make_sample(name, od_traces, time=None, extra_meas=None,
-                 blanked=None, normalized=None):
+
+def _make_sample(
+    name, od_traces, time=None, extra_meas=None, blanked=None, normalized=None
+):
     """
     Build a Sample-like object with hand-crafted arrays.
 
@@ -36,7 +37,9 @@ def _make_sample(name, od_traces, time=None, extra_meas=None,
     s: Sample = object.__new__(Sample)
     s.name = name
     s.wells = []
-    s.time = np.arange(T, dtype=float) if time is None else np.asarray(time, dtype=float)
+    s.time = (
+        np.arange(T, dtype=float) if time is None else np.asarray(time, dtype=float)
+    )
     s.concentrations = np.array([0.0])
     s._timeseries_concentration_order = np.array([0.0])
     s.medium = None
@@ -107,6 +110,7 @@ def _make_frame(samples: dict) -> SampleFrame:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestAlignReplicatesByOD:
 
     def test_basic_shift_different_crossings(self):
@@ -120,7 +124,9 @@ class TestAlignReplicatesByOD:
         sample = _make_sample("s1", [rep0, rep1])
         frame = _make_frame({"s1": sample})
 
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.5, min_timepoints=1)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.5, min_timepoints=1
+        )
 
         ns = new_frame["s1"]
         assert ns.time[0] == 0.0
@@ -149,7 +155,9 @@ class TestAlignReplicatesByOD:
         sample = _make_sample("s1", [rep0, rep1])
         frame = _make_frame({"s1": sample})
 
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.5, min_timepoints=10)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.5, min_timepoints=10
+        )
         ns = new_frame["s1"]
         assert ns.time_series["OD600"].shape[1] == 1  # only rep0 survived
 
@@ -160,7 +168,9 @@ class TestAlignReplicatesByOD:
         sample = _make_sample("s1", [rep0, rep1])
         frame = _make_frame({"s1": sample})
 
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.5, min_timepoints=1)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.5, min_timepoints=1
+        )
         assert new_frame["s1"].time_series["OD600"].shape[1] == 1
 
     def test_all_replicates_dropped_raises(self):
@@ -179,12 +189,15 @@ class TestAlignReplicatesByOD:
         gfp0 = [10.0] * 12
         gfp1 = [20.0] * 12
         sample = _make_sample(
-            "s1", [rep0, rep1],
+            "s1",
+            [rep0, rep1],
             blanked={"GFP": [gfp0, gfp1]},
         )
         frame = _make_frame({"s1": sample})
 
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.5, min_timepoints=1)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.5, min_timepoints=1
+        )
         ns = new_frame["s1"]
         T = len(ns.time)
         assert ns.blanked_data["GFP"].shape[0] == T
@@ -196,12 +209,15 @@ class TestAlignReplicatesByOD:
         norm0 = [5.0] * 12
         norm1 = [6.0] * 12
         sample = _make_sample(
-            "s1", [rep0, rep1],
+            "s1",
+            [rep0, rep1],
             normalized={"GFP": [norm0, norm1]},
         )
         frame = _make_frame({"s1": sample})
 
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.5, min_timepoints=1)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.5, min_timepoints=1
+        )
         ns = new_frame["s1"]
         T = len(ns.time)
         assert ns.normalized_data["GFP"].shape[0] == T
@@ -224,7 +240,9 @@ class TestAlignReplicatesByOD:
     def test_non_uniform_time_axis(self):
         """Non-uniform time spacing is handled correctly via real time values."""
         # time: [0, 1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66]
-        time = np.array([0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 21.0, 28.0, 36.0, 45.0, 55.0, 66.0])
+        time = np.array(
+            [0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 21.0, 28.0, 36.0, 45.0, 55.0, 66.0]
+        )
         rep0 = [0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
         rep1 = [0.0, 0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
         # rep0 crosses at idx 2 (time=3), rep1 crosses at idx 3 (time=6)
@@ -232,7 +250,9 @@ class TestAlignReplicatesByOD:
         sample = _make_sample("s1", [rep0, rep1], time=time)
         frame = _make_frame({"s1": sample})
 
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.5, min_timepoints=1)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.5, min_timepoints=1
+        )
         ns = new_frame["s1"]
 
         assert ns.time[0] == pytest.approx(0.0)
@@ -243,7 +263,9 @@ class TestAlignReplicatesByOD:
         assert np.allclose(ns.time, expected)
 
     def test_returns_trimmed_duration_and_original_time_summary(self):
-        time = np.array([0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 21.0, 28.0, 36.0, 45.0, 55.0, 66.0])
+        time = np.array(
+            [0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 21.0, 28.0, 36.0, 45.0, 55.0, 66.0]
+        )
         rep0 = [0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
         rep1 = [0.0, 0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
         frame = _make_frame({"s1": _make_sample("s1", [rep0, rep1], time=time)})
@@ -274,5 +296,7 @@ class TestAlignReplicatesByOD:
         rep0 = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5]
         sample = _make_sample("s1", [rep0])
         frame = _make_frame({"s1": sample})
-        new_frame = align_replicates_by_od(frame, "OD600", od_threshold=0.3, min_timepoints=1)
+        new_frame = align_replicates_by_od(
+            frame, "OD600", od_threshold=0.3, min_timepoints=1
+        )
         assert "aligned_OD0.3" in new_frame.name

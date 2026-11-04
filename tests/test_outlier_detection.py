@@ -5,9 +5,9 @@ Test script to verify outlier detection functionality in Plate class.
 
 import numpy as np
 
-
 from fluoropy.core.plate import Plate
 from fluoropy.core.well import Well
+
 
 def test_outlier_detection():
     """Test the outlier detection functionality."""
@@ -67,20 +67,25 @@ def test_outlier_detection():
     for group, outlier_list in outliers.items():
         print(f"   {group}: {len(outlier_list)} outliers")
         for outlier in outlier_list:
-            print(f"     - {outlier['well_id']}: value={outlier['value']:.2f}, z_score={outlier['z_score']:.2f}")
+            print(
+                f"     - {outlier['well_id']}: value={outlier['value']:.2f}, z_score={outlier['z_score']:.2f}"
+            )
 
     print("\n=== Test Complete ===")
 
     # Verify our expected results
-    if group_key in stats and stats[group_key]['outlier_count'] > 0:
-        outlier_well_ids = [outlier['well_id'] for outlier in stats[group_key]['outlier_wells']]
-        if 'A5' in outlier_well_ids:
+    if group_key in stats and stats[group_key]["outlier_count"] > 0:
+        outlier_well_ids = [
+            outlier["well_id"] for outlier in stats[group_key]["outlier_wells"]
+        ]
+        if "A5" in outlier_well_ids:
             print("✅ SUCCESS: A5 correctly identified as outlier!")
         else:
             print("❌ FAILURE: A5 not identified as outlier")
             print(f"   Identified outliers: {outlier_well_ids}")
     else:
         print("❌ FAILURE: No outliers detected")
+
 
 if __name__ == "__main__":
     test_outlier_detection()

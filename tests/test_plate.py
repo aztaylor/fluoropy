@@ -6,26 +6,29 @@ data loading, statistical analysis, and integration with Well objects.
 """
 
 import sys
+
 import numpy as np
 import pandas as pd
-
 
 from fluoropy.core.plate import Plate
 from fluoropy.core.well import Well
 
+
 def create_test_data():
     """Create test data for plate loading"""
     # Create sample map (8x12 for 96-well plate)
-    sample_map = np.array([
-        ["s14"] * 6 + ["s22"] * 6,
-        ["s14"] * 6 + ["s22"] * 6,
-        ["s14"] * 6 + ["s22"] * 6,
-        ["s54"] * 6 + ["s63"] * 6,
-        ["s54"] * 6 + ["s63"] * 6,
-        ["s54"] * 6 + ["s63"] * 6,
-        ["Blank"] * 12,
-        ["NC"] * 6 + ["WT"] * 6
-    ])
+    sample_map = np.array(
+        [
+            ["s14"] * 6 + ["s22"] * 6,
+            ["s14"] * 6 + ["s22"] * 6,
+            ["s14"] * 6 + ["s22"] * 6,
+            ["s54"] * 6 + ["s63"] * 6,
+            ["s54"] * 6 + ["s63"] * 6,
+            ["s54"] * 6 + ["s63"] * 6,
+            ["Blank"] * 12,
+            ["NC"] * 6 + ["WT"] * 6,
+        ]
+    )
 
     # Create concentration map with a serial dilution
     concentrations = [10000, 3162, 1000, 316, 100, 31.6, 10, 3.16, 1, 0.316, 0.1, 0.0]
@@ -38,25 +41,26 @@ def create_test_data():
 
     # Make data realistic - growing OD, variable GFP
     for i in range(n_timepoints):
-        od_data[:, :, i] = od_data[:, :, 0] + i * 0.02 + np.random.normal(0, 0.01, (8, 12))
+        od_data[:, :, i] = (
+            od_data[:, :, 0] + i * 0.02 + np.random.normal(0, 0.01, (8, 12))
+        )
         # GFP varies with concentration and time
         for row in range(8):
             for col in range(12):
-                conc_factor = conc_map[row, col] / 10000  # Normalize to max concentration
-                gfp_data[row, col, i] = 500 + 1500 * conc_factor + i * 10 + np.random.normal(0, 50)
+                conc_factor = (
+                    conc_map[row, col] / 10000
+                )  # Normalize to max concentration
+                gfp_data[row, col, i] = (
+                    500 + 1500 * conc_factor + i * 10 + np.random.normal(0, 50)
+                )
 
-    data_dict = {
-        "600": od_data,
-        "GFP:480,510": gfp_data
-    }
+    data_dict = {"600": od_data, "GFP:480,510": gfp_data}
 
     time_points = np.arange(n_timepoints) * 0.25  # 15-minute intervals
-    time_dict = {
-        "600": time_points,
-        "GFP:480,510": time_points
-    }
+    time_dict = {"600": time_points, "GFP:480,510": time_points}
 
     return sample_map, conc_map, data_dict, time_dict
+
 
 def test_plate_initialization():
     """Test basic plate initialization"""
@@ -86,6 +90,7 @@ def test_plate_initialization():
 
     print("✅ Plate initialization test passed")
 
+
 def test_well_indexing():
     """Test plate well indexing and iteration"""
     print("\nTesting Well Indexing...")
@@ -113,6 +118,7 @@ def test_well_indexing():
     assert wells_flat[12].well_id == "B1"  # Second row, first column
 
     print("✅ Well indexing test passed")
+
 
 def test_load_from_arrays():
     """Test loading data from arrays with concentration mapping"""
@@ -146,6 +152,7 @@ def test_load_from_arrays():
 
     print("✅ Load from arrays test passed")
 
+
 def test_concentration_validation():
     """Test concentration loading validation"""
     print("\nTesting Concentration Validation...")
@@ -170,6 +177,7 @@ def test_concentration_validation():
 
     print("✅ Concentration validation test passed")
 
+
 def test_plotting_methods():
     """Test plotting functionality (without actually showing plots)"""
     print("\nTesting Plotting Methods...")
@@ -181,7 +189,8 @@ def test_plotting_methods():
 
     # Test well curves plotting (just check it doesn't crash)
     import matplotlib
-    matplotlib.use('Agg')  # Use non-interactive backend
+
+    matplotlib.use("Agg")  # Use non-interactive backend
 
     try:
         fig, ax = plate.plot_well_curves("600", wells=["A1", "A2", "A3"])
@@ -197,6 +206,7 @@ def test_plotting_methods():
 
     except Exception as e:
         print(f"⚠️  Plotting test skipped (matplotlib issue): {e}")
+
 
 def test_data_export():
     """Test data export to DataFrame"""
@@ -227,6 +237,7 @@ def test_data_export():
 
     print("✅ Data export test passed")
 
+
 def test_well_organization():
     """Test well organization and filtering methods"""
     print("\nTesting Well Organization...")
@@ -237,8 +248,12 @@ def test_well_organization():
     # Blank/control classification is explicit -- load_from_arrays no longer
     # infers it from sample names.
     plate.load_from_arrays(
-        sample_map, conc_map, data_dict, time_dict,
-        controls=["NC"], blanks=["Blank"],
+        sample_map,
+        conc_map,
+        data_dict,
+        time_dict,
+        controls=["NC"],
+        blanks=["Blank"],
     )
 
     # Test getting wells by sample type
@@ -258,6 +273,7 @@ def test_well_organization():
     assert len(high_conc_wells) == 8  # One per row
 
     print("✅ Well organization test passed")
+
 
 def test_summary_methods():
     """Test summary printing methods"""

@@ -3,7 +3,8 @@ Plate and Well classes for managing fluorescence assay data.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -120,13 +121,15 @@ ROLE_CONTROL = "control"  # a control whose polarity is unspecified
 ROLE_NEGATIVE_CONTROL = "negative_control"
 ROLE_POSITIVE_CONTROL = "positive_control"
 
-VALID_ROLES = frozenset({
-    ROLE_SAMPLE,
-    ROLE_BLANK,
-    ROLE_CONTROL,
-    ROLE_NEGATIVE_CONTROL,
-    ROLE_POSITIVE_CONTROL,
-})
+VALID_ROLES = frozenset(
+    {
+        ROLE_SAMPLE,
+        ROLE_BLANK,
+        ROLE_CONTROL,
+        ROLE_NEGATIVE_CONTROL,
+        ROLE_POSITIVE_CONTROL,
+    }
+)
 
 #: Accepted spellings that canonicalize to a role in VALID_ROLES.
 ROLE_ALIASES = {
@@ -144,11 +147,13 @@ ROLE_ALIASES = {
 }
 
 #: Roles that count as controls for get_control_wells() and is_control.
-CONTROL_ROLES = frozenset({
-    ROLE_CONTROL,
-    ROLE_NEGATIVE_CONTROL,
-    ROLE_POSITIVE_CONTROL,
-})
+CONTROL_ROLES = frozenset(
+    {
+        ROLE_CONTROL,
+        ROLE_NEGATIVE_CONTROL,
+        ROLE_POSITIVE_CONTROL,
+    }
+)
 
 
 def canonical_role(role: Optional[str]) -> str:
@@ -229,9 +234,13 @@ class Well:
         self.other_modifications: Dict[str, float] = {}  # e.g., {'supplement': 1.0}
 
         # Units for each molecule
-        self.antibiotics_units: Dict[str, str] = {}  # e.g., {'Kan': 'µg/mL', 'Chlor': 'µg/mL'}
+        self.antibiotics_units: Dict[str, str] = (
+            {}
+        )  # e.g., {'Kan': 'µg/mL', 'Chlor': 'µg/mL'}
         self.inducers_units: Dict[str, str] = {}  # e.g., {'aTc': 'ng/mL', 'IPTG': 'mM'}
-        self.other_modifications_units: Dict[str, str] = {}  # e.g., {'supplement': 'g/L'}
+        self.other_modifications_units: Dict[str, str] = (
+            {}
+        )  # e.g., {'supplement': 'g/L'}
 
         # Non-chemical properties of the construct or strain in this well:
         # "non-targeting", "dCas12a", "delta-recA", a plasmid variant, and so
@@ -268,8 +277,10 @@ class Well:
         """String representation of the well."""
         excluded_str = " [EXCLUDED]" if self.exclude else ""
         role_str = "" if self.role == ROLE_SAMPLE else f", role={self.role}"
-        return (f"Well({self.well_id}, sample={self.sample_name}, "
-                f"conc={self.concentration}{role_str}){excluded_str}")
+        return (
+            f"Well({self.well_id}, sample={self.sample_name}, "
+            f"conc={self.concentration}{role_str}){excluded_str}"
+        )
 
     # ======================================================================
     # IDENTITY
@@ -310,8 +321,9 @@ class Well:
     def role(self, value: Optional[str]) -> None:
         self._role = canonical_role(value)
 
-    def _set_role_flag(self, flag: bool, role_when_true: str,
-                       roles_cleared: frozenset) -> None:
+    def _set_role_flag(
+        self, flag: bool, role_when_true: str, roles_cleared: frozenset
+    ) -> None:
         """
         Write-through helper for the boolean views.
 
@@ -352,8 +364,9 @@ class Well:
 
     @is_negative_control.setter
     def is_negative_control(self, value: bool) -> None:
-        self._set_role_flag(bool(value), ROLE_NEGATIVE_CONTROL,
-                            frozenset({ROLE_NEGATIVE_CONTROL}))
+        self._set_role_flag(
+            bool(value), ROLE_NEGATIVE_CONTROL, frozenset({ROLE_NEGATIVE_CONTROL})
+        )
 
     @property
     def is_positive_control(self) -> bool:
@@ -362,8 +375,9 @@ class Well:
 
     @is_positive_control.setter
     def is_positive_control(self, value: bool) -> None:
-        self._set_role_flag(bool(value), ROLE_POSITIVE_CONTROL,
-                            frozenset({ROLE_POSITIVE_CONTROL}))
+        self._set_role_flag(
+            bool(value), ROLE_POSITIVE_CONTROL, frozenset({ROLE_POSITIVE_CONTROL})
+        )
 
     # Short aliases, matching how plates get talked about at the bench.
     @property
@@ -386,21 +400,23 @@ class Well:
     # BASIC INFORMATION METHODS
     # ======================================================================
 
-    def set_sample_info(self, sample_type: str,
-                        concentration: Optional[float] = None,
-                        medium: Optional[str] = None,
-                        antibiotics: Optional[Dict[str, float]] = None,
-                        inducers: Optional[Dict[str, float]] = None,
-                        moi: Optional[str] = None,
-                        other_modifications: Optional[Dict[str, float]] = None,
-                        strain_modifications: Optional[List[str]] = None,
-                        antibiotics_units: Optional[Dict[str, str]] = None,
-                        inducers_units: Optional[Dict[str, str]] = None,
-                        other_modifications_units: Optional[Dict[str, str]] = None,
-                        is_blank: bool = False,
-                        is_control: bool = False,
-                        role: Optional[str] = None):
-
+    def set_sample_info(
+        self,
+        sample_type: str,
+        concentration: Optional[float] = None,
+        medium: Optional[str] = None,
+        antibiotics: Optional[Dict[str, float]] = None,
+        inducers: Optional[Dict[str, float]] = None,
+        moi: Optional[str] = None,
+        other_modifications: Optional[Dict[str, float]] = None,
+        strain_modifications: Optional[List[str]] = None,
+        antibiotics_units: Optional[Dict[str, str]] = None,
+        inducers_units: Optional[Dict[str, str]] = None,
+        other_modifications_units: Optional[Dict[str, str]] = None,
+        is_blank: bool = False,
+        is_control: bool = False,
+        role: Optional[str] = None,
+    ):
         """
         Set sample information for the well.
 
@@ -456,7 +472,9 @@ class Well:
         # Set molecule concentrations
         if antibiotics is not None:
             if not isinstance(antibiotics, dict):
-                raise ValueError(f"Antibiotics should be a dict. Got: {type(antibiotics)}")
+                raise ValueError(
+                    f"Antibiotics should be a dict. Got: {type(antibiotics)}"
+                )
             self.antibiotics.update(antibiotics)
 
         if inducers is not None:
@@ -466,23 +484,31 @@ class Well:
 
         if other_modifications is not None:
             if not isinstance(other_modifications, dict):
-                raise ValueError(f"Other modifications should be a dict. Got: {type(other_modifications)}")
+                raise ValueError(
+                    f"Other modifications should be a dict. Got: {type(other_modifications)}"
+                )
             self.other_modifications.update(other_modifications)
 
         # Set molecule units
         if antibiotics_units is not None:
             if not isinstance(antibiotics_units, dict):
-                raise ValueError(f"Antibiotics units should be a dict. Got: {type(antibiotics_units)}")
+                raise ValueError(
+                    f"Antibiotics units should be a dict. Got: {type(antibiotics_units)}"
+                )
             self.antibiotics_units.update(antibiotics_units)
 
         if inducers_units is not None:
             if not isinstance(inducers_units, dict):
-                raise ValueError(f"Inducers units should be a dict. Got: {type(inducers_units)}")
+                raise ValueError(
+                    f"Inducers units should be a dict. Got: {type(inducers_units)}"
+                )
             self.inducers_units.update(inducers_units)
 
         if other_modifications_units is not None:
             if not isinstance(other_modifications_units, dict):
-                raise ValueError(f"Other modifications units should be a dict. Got: {type(other_modifications_units)}")
+                raise ValueError(
+                    f"Other modifications units should be a dict. Got: {type(other_modifications_units)}"
+                )
             self.other_modifications_units.update(other_modifications_units)
 
         self._set_concentration(concentration)
@@ -528,14 +554,17 @@ class Well:
             elif self.moi in self.other_modifications.keys():
                 self.concentration = self.other_modifications[self.moi]
             else:
-                raise ValueError(f"MOI '{self.moi}' not found in inducers, antibiotics, or other modifications for this well.\n Current inducers: {self.inducers}\n Current antibiotics: {self.antibiotics}\n Current modifications: {self.other_modifications}")
+                raise ValueError(
+                    f"MOI '{self.moi}' not found in inducers, antibiotics, or other modifications for this well.\n Current inducers: {self.inducers}\n Current antibiotics: {self.antibiotics}\n Current modifications: {self.other_modifications}"
+                )
         elif len(self.inducers) == 1:
             self.concentration = self.inducers[list(self.inducers.keys())[0]]
         elif len(self.antibiotics) == 1:
             self.concentration = self.antibiotics[list(self.antibiotics.keys())[0]]
         elif len(self.other_modifications) == 1:
-            self.concentration = self.other_modifications[list(self.other_modifications.keys())[0]]
-
+            self.concentration = self.other_modifications[
+                list(self.other_modifications.keys())[0]
+            ]
 
     def set_concentration_molecule(self, molecule: str):
         """Set the concentration for this well based on the molecule of
@@ -577,7 +606,11 @@ class Well:
             self.medium,
             frozenset(self.antibiotics.items()) if self.antibiotics else frozenset(),
             frozenset(self.inducers.items()) if self.inducers else frozenset(),
-            frozenset(self.other_modifications.items()) if self.other_modifications else frozenset()
+            (
+                frozenset(self.other_modifications.items())
+                if self.other_modifications
+                else frozenset()
+            ),
         )
 
     # ======================================================================
@@ -609,8 +642,12 @@ class Well:
     # DATA STORAGE METHODS
     # ======================================================================
 
-    def add_time_series(self, measurement_type: str, data: Union[List, np.ndarray],
-                       time_points: Optional[Union[List, np.ndarray]] = None):
+    def add_time_series(
+        self,
+        measurement_type: str,
+        data: Union[List, np.ndarray],
+        time_points: Optional[Union[List, np.ndarray]] = None,
+    ):
         """
         Add time series data for a specific measurement type.
 

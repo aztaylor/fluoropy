@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from fluoropy.core.sampleframe import SampleFrame
     from fluoropy.core.sample import Sample
+    from fluoropy.core.sampleframe import SampleFrame
 
 
 def align_replicates_by_od(
@@ -76,7 +76,7 @@ def align_replicates_by_od(
     # ------------------------------------------------------------------ #
     # Phase A – compute per-replicate shift indices                        #
     # ------------------------------------------------------------------ #
-    shift_indices: dict[str, list[int | None]] = {}   # sid -> [shift or None per rep]
+    shift_indices: dict[str, list[int | None]] = {}  # sid -> [shift or None per rep]
 
     for sid, sample in frame.samples.items():
         if blanks is not None and sid in blanks:
@@ -91,7 +91,7 @@ def align_replicates_by_od(
                 f"sample '{sid}' has no time array — cannot build aligned time axis."
             )
 
-        od_arr = sample.time_series[od_measurement]   # (T, R, C)
+        od_arr = sample.time_series[od_measurement]  # (T, R, C)
         T, R, C = od_arr.shape
 
         # Guard out-of-bounds for samples with a single concentration column
@@ -112,7 +112,7 @@ def align_replicates_by_od(
     # ------------------------------------------------------------------ #
     # Phase B – determine surviving replicates and global_len             #
     # ------------------------------------------------------------------ #
-    surviving: dict[str, list[int]] = {}   # sid -> list of surviving rep indices
+    surviving: dict[str, list[int]] = {}  # sid -> list of surviving rep indices
     trimmed_lengths: list[int] = []
     start_times: list[float] = []
     stop_times: list[float] = []
@@ -202,7 +202,10 @@ def align_replicates_by_od(
         new_sample.wells = [sample.wells[r] for r in surv if r < len(sample.wells)]
 
         # --- build new time axis ----------------------------------------
-        new_sample.time = sample.time[anchor_shift: anchor_shift + global_len] - sample.time[anchor_shift]
+        new_sample.time = (
+            sample.time[anchor_shift : anchor_shift + global_len]
+            - sample.time[anchor_shift]
+        )
 
         # --- trim each data source --------------------------------------
         for ds in DATA_SOURCES:
@@ -217,7 +220,7 @@ def align_replicates_by_od(
                     new_arr = np.full((global_len, n_new_reps, arr.shape[2]), np.nan)
                     for new_r, old_r in enumerate(valid_surv):
                         s = shifts[old_r]
-                        new_arr[:, new_r, :] = arr[s: s + global_len, old_r, :]
+                        new_arr[:, new_r, :] = arr[s : s + global_len, old_r, :]
                     new_dict[meas] = new_arr
             setattr(new_sample, ds, new_dict)
 
@@ -229,9 +232,9 @@ def align_replicates_by_od(
                     conc_data = arr[:, :, conc_idx]
                     valid_replicates = np.sum(~np.isnan(conc_data), axis=0)
                     if len(valid_replicates) > 0:
-                        new_sample.n_replicates[f"{measurement_type}_{concentration}"] = int(
-                            np.max(valid_replicates)
-                        )
+                        new_sample.n_replicates[
+                            f"{measurement_type}_{concentration}"
+                        ] = int(np.max(valid_replicates))
 
         # Initialise the derived stat dicts to empty (will be populated below)
         for ds in DATA_SOURCES:
@@ -239,11 +242,17 @@ def align_replicates_by_od(
             setattr(new_sample, f"{ds}_error", {})
 
         # --- recompute statistics ----------------------------------------
-        new_sample.calculate_data_source_statistics("time_series", error_type=error_type)
+        new_sample.calculate_data_source_statistics(
+            "time_series", error_type=error_type
+        )
         if new_sample.blanked_data:
-            new_sample.calculate_data_source_statistics("blanked_data", error_type=error_type)
+            new_sample.calculate_data_source_statistics(
+                "blanked_data", error_type=error_type
+            )
         if new_sample.normalized_data:
-            new_sample.calculate_data_source_statistics("normalized_data", error_type=error_type)
+            new_sample.calculate_data_source_statistics(
+                "normalized_data", error_type=error_type
+            )
 
         trimmed_samples[sid] = new_sample
 

@@ -7,15 +7,13 @@ __version__ = "0.1.0"
 __author__ = "Aleczander Taylor"
 __email__ = "aztaylor76@fastmail.com"
 
-# Import main modules/classes here for easy access
-from .core import Plate, Well, Sample, SampleFrame, Fluorophore, plotting
-from .core.fluorophore import fluorophore_db
-
-# Import utility modules (users can access as fluoropy.utils.*)
-from . import utils
-
 # Import analysis modules (users can access as fluoropy.analysis.*)
-from . import analysis
+# Import utility modules (users can access as fluoropy.utils.*)
+from . import analysis, utils
+
+# Import main modules/classes here for easy access
+from .core import Fluorophore, Plate, Sample, SampleFrame, Well, plotting
+from .core.fluorophore import fluorophore_db
 
 # Make key classes/functions available at package level
 __all__ = [
