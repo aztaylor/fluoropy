@@ -3,7 +3,6 @@ Tests for SampleFrame keep_controls_separate option.
 """
 
 import numpy as np
-import pytest
 
 from fluoropy.core.sampleframe import SampleFrame
 from fluoropy.core.well import Well

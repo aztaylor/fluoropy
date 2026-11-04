@@ -103,7 +103,8 @@ pytest -m integration           # needs a local Gen5 export (skipped otherwise)
 ```
 
 CI runs the suite on Python 3.9, 3.11 and 3.13, plus a job asserting the package
-imports without the optional `viz` extra. `main` requires all four to pass.
+imports without the optional `viz` extra, and a lint job (black, isort,
+flake8 at the versions pinned in `.pre-commit-config.yaml`).
 
 Known-but-unfixed behaviour is pinned with `@pytest.mark.xfail(strict=True)`, so
 it fails loudly when fixed and the mark can be removed.

@@ -82,7 +82,7 @@ def test_layout_calculation():
             print(f"  ✓ Subplots created: {n_subplots}")
 
             if aspect_ratio < 1.2 or aspect_ratio > 1.6:
-                print(f"  ⚠ Aspect ratio slightly outside golden ratio")
+                print("  ⚠ Aspect ratio slightly outside golden ratio")
 
             # Clean up
             import matplotlib.pyplot as plt

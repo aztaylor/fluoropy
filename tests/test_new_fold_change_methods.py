@@ -3,11 +3,9 @@ Test the new fold change calculation methods with synthetic data.
 """
 
 import numpy as np
-import pandas as pd
 
 from fluoropy.core.plate import Plate
 from fluoropy.core.sampleframe import SampleFrame
-from fluoropy.core.well import Well
 
 
 def create_synthetic_plate(plate_name="TestPlate"):
@@ -130,7 +128,8 @@ def test_fold_change_workflow():
             for measurement, data in sample.time_series.items():
                 n_timepoints, n_replicates, n_concentrations = data.shape
                 print(
-                    f"     {measurement}: shape {data.shape} ({n_timepoints} timepoints, {n_replicates} replicates, {n_concentrations} concentrations)"
+                    f"     {measurement}: shape {data.shape} ({n_timepoints} timepoints, "
+                    f"{n_replicates} replicates, {n_concentrations} concentrations)"
                 )
 
     # Step 1: Blank-subtracted timeseries

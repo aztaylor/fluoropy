@@ -5,13 +5,9 @@ Tests the comprehensive Plate class features including concentration mapping,
 data loading, statistical analysis, and integration with Well objects.
 """
 
-import sys
-
 import numpy as np
-import pandas as pd
 
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
 
 
 def create_test_data():

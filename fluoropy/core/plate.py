@@ -282,7 +282,7 @@ class Plate:
         # Priority 1: Explicit concentration layout
         if concentration_layout is not None:
             logger.info(
-                f"Using explicit concentration layout as primary concentration..."
+                "Using explicit concentration layout as primary concentration..."
             )
             conc_grid = self._read_grid_csv(concentration_layout)
             for row in range(min(conc_grid.shape[0], self.rows)):
@@ -845,7 +845,7 @@ class Plate:
             )
             logger.info(f"   Wells with concentrations: {len(concentrations)}")
         else:
-            logger.info(f"   No concentrations loaded")
+            logger.info("   No concentrations loaded")
 
         logger.info(f"   Measurements loaded: {list(data_dict.keys())}")
 
@@ -936,12 +936,12 @@ class Plate:
             logger.info("❌ No wells have concentration data loaded")
             return False
 
-        logger.info(f"✅ Concentration validation passed:")
+        logger.info("✅ Concentration validation passed:")
         logger.info(f"   {len(wells_with_conc)} wells have concentration data")
 
         # Show a few examples
         sample_wells = wells_with_conc[:5]  # First 5 wells with concentrations
-        logger.info(f"   Example wells:")
+        logger.info("   Example wells:")
         for well in sample_wells:
             logger.info(
                 f"     {well.well_id}: {well.sample_type} at {well.concentration}"

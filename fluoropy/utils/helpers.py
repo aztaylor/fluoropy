@@ -5,8 +5,6 @@ General helper utilities for fluoropy package.
 import string
 from typing import List, Union
 
-import numpy as np
-
 
 def generate_well_positions(
     plate_format: str = "96", row_wise: bool = True

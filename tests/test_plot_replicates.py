@@ -9,9 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from fluoropy.core.plate import Plate
-from fluoropy.core.sample import Sample
 from fluoropy.core.sampleframe import SampleFrame
-from fluoropy.core.well import Well
 
 
 def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
@@ -234,7 +232,8 @@ def test_multi_plate_plotting():
         print(f"  {sample_id}: {n_wells} total wells")
         for conc, wells in sorted(conc_groups.items()):
             print(
-                f"    [{conc}]: {len(wells)} replicates (across {len(set(getattr(w, 'plate_id', 'unknown') for w in wells))} plates)"
+                f"    [{conc}]: {len(wells)} replicates "
+                f"(across {len({getattr(w, 'plate_id', 'unknown') for w in wells})} plates)"
             )
 
     # Plot with all samples
@@ -306,7 +305,7 @@ def test_plot_customization():
         figsize=(12, 8),
         title="Only Replicates - No Mean",
     )
-    print(f"  ✓ Custom figsize works")
+    print("  ✓ Custom figsize works")
 
     print("\n2. Testing with custom labels...")
     fig2, _ = frame.plot_replicate_time_series(
@@ -325,7 +324,7 @@ def test_plot_customization():
         show_mean=True,
         title="All Options - Auto Size",
     )
-    print(f"  ✓ Auto figsize works")
+    print("  ✓ Auto figsize works")
     print(f"  ✓ Returned {len(axes)} sample-concentration subplots")
 
     plt.show()

@@ -4,7 +4,6 @@ time_series array columns and self.concentrations.
 """
 
 import numpy as np
-import pytest
 
 from fluoropy.core.sample import Sample
 from fluoropy.core.well import Well

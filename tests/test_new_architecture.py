@@ -22,7 +22,7 @@ def test_new_architecture():
     # Test imports
     try:
         print("Testing imports...")
-        from fluoropy.core import Plate, Sample, SampleFrame, Well
+        from fluoropy.core import Plate, Sample, SampleFrame, Well  # noqa: F401
 
         print("✅ Successfully imported: Plate, Well, Sample, SampleFrame")
     except ImportError as e:
@@ -150,7 +150,7 @@ def test_new_architecture():
     frame.calculate_blank_subtracted_timeseries(["OD600", "GFP"])
     frame.calculate_normalized_timeseries(od_measurement="OD600", alpha=0.01)
 
-    print(f"   Processing completed!")
+    print("   Processing completed!")
 
     sample_1 = frame["sample_1"]
     assert sample_1.blanked_data, "blank subtraction produced no data"

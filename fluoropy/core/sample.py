@@ -30,7 +30,7 @@ reference rather than a fold change of their own. It is therefore labelled by
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -107,7 +107,8 @@ class Sample:
         Shape: (n_timepoints, n_concentrations)
 
     normalized_data_error : Dict[str, np.ndarray]
-        Error (std/sem) for normalized data across replicates for each measurement type (requires calculate_normalized_data)
+        Error (std/sem) for normalized data across replicates for each measurement
+        type (requires calculate_normalized_data)
         Shape: (n_timepoints, n_concentrations)
 
     """
@@ -1063,17 +1064,15 @@ class Sample:
                 od_measurement
             ]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.blanked_data
-            data_type_name = "blanked data"
         else:
             logger.warning(
-                f"Using raw time series data for normalization instead of blanked data. "
-                f"Consider running calculate_blanked_data() first for more accurate results."
+                "Using raw time series data for normalization instead of blanked data. "
+                "Consider running calculate_blanked_data() first for more accurate results."
             )
             od_data = self.time_series[
                 od_measurement
             ]  # shape: (n_timepoints, n_replicates, n_concentrations)
             data_source = self.time_series
-            data_type_name = "time series data"
 
         if measurement_types is None:
             measurement_types = list(data_source.keys())

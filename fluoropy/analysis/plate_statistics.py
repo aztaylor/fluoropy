@@ -19,7 +19,6 @@ For a z-score that is not dragged around by the outliers you are hunting, see
 """
 
 import logging
-from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -58,7 +57,8 @@ def calculate_timepoint_statistics(
     -------
     Dict[str, Dict[str, Any]]
         Dictionary with 'sample_type_concentration' keys, and statistics dictionaries as values.
-        Each statistics dictionary contains: 'mean', 'std', 'sem', 'count', 'min', 'max', 'median', 'q25', 'q75', 'iqr', 'outlier_wells'
+        Each statistics dictionary contains: 'mean', 'std', 'sem', 'count',
+        'min', 'max', 'median', 'q25', 'q75', 'iqr', 'outlier_wells'
 
     Examples
     --------
@@ -119,7 +119,6 @@ def calculate_timepoint_statistics(
         # Extract values and well information
         values = [item["value"] for item in well_data_list]
         well_ids = [item["well_id"] for item in well_data_list]
-        wells = [item["well"] for item in well_data_list]
 
         values_array = np.array(values)
 

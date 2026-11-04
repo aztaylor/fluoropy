@@ -113,7 +113,7 @@ def import_results(
                         row += 1
             time_i += 1
 
-        elif "Procedure Summary" in read_line and read_flag == None:
+        elif "Procedure Summary" in read_line and read_flag is None:
             metadata_flag = read_line[0]
             read_flag = None
 

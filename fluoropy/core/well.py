@@ -555,7 +555,11 @@ class Well:
                 self.concentration = self.other_modifications[self.moi]
             else:
                 raise ValueError(
-                    f"MOI '{self.moi}' not found in inducers, antibiotics, or other modifications for this well.\n Current inducers: {self.inducers}\n Current antibiotics: {self.antibiotics}\n Current modifications: {self.other_modifications}"
+                    f"MOI '{self.moi}' not found in inducers, antibiotics, or "
+                    f"other modifications for this well.\n"
+                    f" Current inducers: {self.inducers}\n"
+                    f" Current antibiotics: {self.antibiotics}\n"
+                    f" Current modifications: {self.other_modifications}"
                 )
         elif len(self.inducers) == 1:
             self.concentration = self.inducers[list(self.inducers.keys())[0]]

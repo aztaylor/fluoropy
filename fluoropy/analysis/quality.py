@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from ..core.well import ROLE_NEGATIVE_CONTROL, ROLE_POSITIVE_CONTROL
-from ._extract import all_well_values, resolve_controls, well_values
+from ._extract import resolve_controls, well_values
 
 
 def calculate_z_factor(

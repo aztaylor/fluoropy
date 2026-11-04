@@ -4,7 +4,7 @@ SampleFrame class for managing collections of samples from experimental plates.
 
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -181,7 +181,7 @@ class SampleFrame:
         n_tests = len(self.get_test_samples())
 
         summary_lines = [
-            f"SampleFrame Summary:",
+            "SampleFrame Summary:",
             f"  Total samples: {n_samples}",
             f"  Blank samples: {n_blanks}",
             f"  Control samples: {n_controls}",
@@ -749,7 +749,6 @@ class SampleFrame:
             If False, use controls only from same plate (per-plate matching)
             If True, pool controls across all plates
         """
-        import pandas as pd
 
         # First ensure we have blank-subtracted and normalized data
         self.calculate_blank_subtracted_timeseries(
@@ -886,12 +885,12 @@ class SampleFrame:
         # Get sample wells at zero concentration (for normalization)
         sample_zero_wells = sample_wells_by_conc.get(0.0, [])
         if not sample_zero_wells:
-            raise ValueError(f"No zero-concentration wells found in sample")
+            raise ValueError("No zero-concentration wells found in sample")
 
         # Get control wells at zero concentration
         control_zero_wells = control_wells_by_conc.get(0.0, [])
         if not control_zero_wells:
-            raise ValueError(f"No zero-concentration wells found in control")
+            raise ValueError("No zero-concentration wells found in control")
 
         # Extract time points
         time_points = (
@@ -969,8 +968,6 @@ class SampleFrame:
                 fold_change[:length, rep_idx, conc_idx] = series[:length]
 
         return fold_change, concentrations
-
-        return df
 
     def calculate_fold_change_statistics(
         self, data_attribute: str = "fold_change", error_type: str = "std"

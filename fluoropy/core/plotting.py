@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import matplotlib.figure
-    import matplotlib.pyplot as plt
 
 
 def _fold_change_dose_response(
@@ -451,7 +450,8 @@ def plot_replicate_time_series(
             for well in frame.samples[sample_id].wells:
                 available_measurements.update(well.time_series.keys())
         raise ValueError(
-            f"Measurement '{measurement}' not found in wells. Available: {list(available_measurements) if available_measurements else 'none'}"
+            f"Measurement '{measurement}' not found in wells. "
+            f"Available: {sorted(available_measurements) or 'none'}"
         )
 
     if wells_with_data == 0:
@@ -855,8 +855,10 @@ def plot_mean_normalized_data(
             continue
 
         if hasattr(sample, "normalized_data_mean") and sample.normalized_data_mean:
+            found = sample.normalized_data_mean.get(measurement)
             logger.info(
-                f"Normalized statistics found for {sample_id} with shape {sample.normalized_data_mean.get(measurement).shape if sample.normalized_data_mean.get(measurement) is not None else 'N/A'}"
+                f"Normalized statistics found for {sample_id} with shape "
+                f"{found.shape if found is not None else 'N/A'}"
             )
             mean_data = sample.normalized_data_mean.get(measurement)
             error_data = (

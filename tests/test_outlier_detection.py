@@ -3,10 +3,7 @@
 Test script to verify outlier detection functionality in Plate class.
 """
 
-import numpy as np
-
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
 
 
 def test_outlier_detection():
@@ -36,7 +33,7 @@ def test_outlier_detection():
     print("=== Testing Outlier Detection ===")
     print(f"Created {len(test_wells_data)} wells for sample_1 at concentration 10.0")
     print(f"Values at timepoint 0: {[data[3][0] for data in test_wells_data]}")
-    print(f"Expected outlier: A5 with value 15.0")
+    print("Expected outlier: A5 with value 15.0")
     print()
 
     # Test calculate_timepoint_statistics

@@ -3,16 +3,11 @@ Simple test script for plotting replicate time series curves in SampleFrame.
 Uses a minimal example without requiring interactive matplotlib display.
 """
 
-import matplotlib
+import matplotlib.pyplot as plt  # conftest.py forces the Agg backend
 import numpy as np
 
-matplotlib.use("Agg")  # Use non-interactive backend
-import matplotlib.pyplot as plt
-
 from fluoropy.core.plate import Plate
-from fluoropy.core.sample import Sample
 from fluoropy.core.sampleframe import SampleFrame
-from fluoropy.core.well import Well
 
 
 def create_small_synthetic_plate() -> Plate:
@@ -110,7 +105,7 @@ def test_basic_functionality(tmp_path):
         print(f"   ✓ Number of subplots: {len(axes)}")
 
         # Show subplot layout
-        print(f"   Subplots:")
+        print("   Subplots:")
         for key in sorted(axes.keys()):
             print(f"     - {key}")
 

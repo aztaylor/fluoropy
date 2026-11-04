@@ -1,11 +1,9 @@
 """Tests for import_data utility."""
 
-import io
 import os
 import tempfile
 
 import numpy as np
-import pytest
 
 from fluoropy.utils.import_data import import_results
 

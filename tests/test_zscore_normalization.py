@@ -6,7 +6,6 @@ Test script to verify z-score normalization functionality in Plate class.
 import numpy as np
 
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
 
 
 def test_zscore_normalization(tmp_path):
@@ -64,9 +63,7 @@ def test_zscore_normalization(tmp_path):
 
     # Test apply_zscore_normalization
     print("2. Testing apply_zscore_normalization (storing in metadata):")
-    applied_z_scores = plate.apply_zscore_normalization(
-        "OD600", timepoint_idx=0, store_in_metadata=True
-    )
+    plate.apply_zscore_normalization("OD600", timepoint_idx=0, store_in_metadata=True)
 
     # Check if z-scores were stored in metadata
     test_well = plate["A1"]
@@ -81,7 +78,7 @@ def test_zscore_normalization(tmp_path):
     print("3. Testing get_zscore_matrix:")
     z_matrix = plate.get_zscore_matrix("OD600", timepoint_idx=0)
     print(f"   Z-score matrix shape: {z_matrix.shape}")
-    print(f"   Matrix (first 3 rows, 4 cols):")
+    print("   Matrix (first 3 rows, 4 cols):")
     for i in range(3):
         row_values = []
         for j in range(4):
@@ -100,7 +97,8 @@ def test_zscore_normalization(tmp_path):
         for well_id, z_score in extreme_wells.items():
             original_value = plate[well_id].time_series["OD600"][0]
             print(
-                f"   {well_id}: value={original_value:5.1f}, z-score={z_score:6.2f} {'(HIGH)' if z_score > 0 else '(LOW)'}"
+                f"   {well_id}: value={original_value:5.1f}, z-score={z_score:6.2f} "
+                f"{'(HIGH)' if z_score > 0 else '(LOW)'}"
             )
     else:
         print("   No wells with extreme z-scores found")
@@ -110,16 +108,11 @@ def test_zscore_normalization(tmp_path):
     print("5. Testing z-scores at different timepoints:")
     for tp in [0, 1, 2]:
         z_scores_tp = plate.calculate_zscore_normalization("OD600", timepoint_idx=tp)
-        values_tp = [
-            plate[well_id].time_series["OD600"][tp]
-            for well_id in ["A1", "C1", "C2"]
-            if well_id in z_scores_tp
-        ]
+        tp_mean = np.mean([plate[wid].time_series["OD600"][tp] for wid in z_scores_tp])
+        print(f"   Timepoint {tp}: mean={tp_mean:.2f}")
         print(
-            f"   Timepoint {tp}: mean={np.mean([plate[wid].time_series['OD600'][tp] for wid in z_scores_tp.keys()]):.2f}"
-        )
-        print(
-            f"     A1: z={z_scores_tp.get('A1', 'N/A'):6.2f}, C1: z={z_scores_tp.get('C1', 'N/A'):6.2f}, C2: z={z_scores_tp.get('C2', 'N/A'):6.2f}"
+            "     "
+            + ", ".join(f"{w}: z={z_scores_tp[w]:6.2f}" for w in ("A1", "C1", "C2"))
         )
 
     print("\n=== Test Complete ===")

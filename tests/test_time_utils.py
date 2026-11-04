@@ -119,7 +119,6 @@ class TestAlignReplicatesByOD:
         # rep 0 crosses at index 2, rep 1 crosses at index 4
         rep0 = [0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
         rep1 = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
-        T = len(rep0)
         # trimmed lengths: rep0 → T-2=10, rep1 → T-4=8 → global_len=8
         sample = _make_sample("s1", [rep0, rep1])
         frame = _make_frame({"s1": sample})

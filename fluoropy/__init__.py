@@ -12,7 +12,14 @@ __email__ = "aztaylor76@fastmail.com"
 from . import analysis, utils
 
 # Import main modules/classes here for easy access
-from .core import Fluorophore, Plate, Sample, SampleFrame, Well, plotting
+from .core import (  # noqa: F401  (plotting is exposed as fluoropy.plotting)
+    Fluorophore,
+    Plate,
+    Sample,
+    SampleFrame,
+    Well,
+    plotting,
+)
 from .core.fluorophore import fluorophore_db
 
 # Make key classes/functions available at package level

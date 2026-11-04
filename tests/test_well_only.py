@@ -5,8 +5,6 @@ Tests the core Well class features including concentration handling,
 sample information, time series data, and metadata management.
 """
 
-import sys
-
 import numpy as np
 
 from fluoropy.core.well import Well

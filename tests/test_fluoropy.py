@@ -1,7 +1,5 @@
 """Tests for fluoropy package."""
 
-import pytest
-
 from fluoropy import __version__
 
 
