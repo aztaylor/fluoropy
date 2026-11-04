@@ -164,6 +164,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.0138. It is now `Sample_C / Sample_0`. Where the control *was* run at the
   dose, it is still divided by `Control_C / Control_0`. **Fold-change values
   computed before this fix are wrong wherever the control lacked the dose.**
+- **`align_replicates_by_od()` built inconsistent samples.** It assembled
+  them by hand, and:
+  - kept `sample.wells[r]` for each surviving replicate *index*, so a sample
+    with several doses kept only its first dose's wells;
+  - reset `negative_control` / `positive_control` to a bare `control`, and
+    left out the fold-change attributes;
+  - left the wells unaligned, so anything that re-read them —
+    `calculate_fold_change()`, blank subtraction — crashed on mismatched
+    lengths or used unaligned data;
+  - required every blank to be listed in `blanks=`, since blank wells never
+    reach an OD threshold.
+
+  Aligned samples are now built through `Sample()` from shifted copies of
+  their wells, and samples whose role is `blank` are treated as blanks
+  without being listed.
 - **`calculate_fold_change()` could take a positive control as the
   reference**, and ignored `matched_control`. It took the first sample with
   `is_control` set. It now uses `matched_control` when set, otherwise the one

@@ -5,6 +5,7 @@ Tests for fluoropy.utils.time_utils.align_replicates_by_od
 import numpy as np
 import pytest
 
+from fluoropy.core.plate import Plate
 from fluoropy.core.sample import Sample
 from fluoropy.core.sampleframe import SampleFrame
 from fluoropy.utils.time_utils import align_replicates_by_od
@@ -18,78 +19,42 @@ def _make_sample(
     name, od_traces, time=None, extra_meas=None, blanked=None, normalized=None
 ):
     """
-    Build a Sample-like object with hand-crafted arrays.
+    Build a single-concentration Sample from real wells, one per replicate.
 
     od_traces : list of 1-D arrays, one per replicate
     extra_meas : dict {label: list-of-arrays} — additional measurements, same
                  shape as od_traces
     blanked / normalized : same format as extra_meas, pre-populated into
                            blanked_data / normalized_data
+
+    These used to be assembled with object.__new__ and no wells at all, a
+    state the library never produces -- and the one in which the aligned
+    frame's wells and arrays were allowed to disagree.
     """
     T = max(len(t) for t in od_traces)
-    R = len(od_traces)
-    C = 1  # single concentration
+    time = np.arange(T, dtype=float) if time is None else np.asarray(time, float)
 
-    od_arr = np.full((T, R, C), np.nan)
+    plate = Plate("96", name=f"plate_{name}")
+    wells = []
     for r, trace in enumerate(od_traces):
-        od_arr[: len(trace), r, 0] = trace
+        well = plate.get_well_by_position(0, r)
+        well.set_sample_info(name, concentration=0.0)
+        well.time_points = time
+        well.add_time_series("OD600", np.asarray(trace, dtype=float))
+        for label, traces in (extra_meas or {}).items():
+            well.add_time_series(label, np.asarray(traces[r], dtype=float))
+        wells.append(well)
 
-    s: Sample = object.__new__(Sample)
-    s.name = name
-    s.wells = []
-    s.time = (
-        np.arange(T, dtype=float) if time is None else np.asarray(time, dtype=float)
-    )
-    s.concentrations = np.array([0.0])
-    s._timeseries_concentration_order = np.array([0.0])
-    s.medium = None
-    s.antibiotics = {}
-    s.inducers = {}
-    s.other_modifications = {}
-    s.is_blank = False
-    s.is_control = False
-    s.matched_control = None
-    s.plate_id = None
-    s.moi = None
-    s.n_replicates = {}
-    s.metadata = {}
+    s = Sample(name, wells)
 
-    s.time_series = {"OD600": od_arr}
-    if extra_meas:
-        for label, traces in extra_meas.items():
-            arr = np.full((T, len(traces), C), np.nan)
+    for attr, data in (("blanked_data", blanked), ("normalized_data", normalized)):
+        for label, traces in (data or {}).items():
+            arr = np.full((T, len(traces), 1), np.nan)
             for r, trace in enumerate(traces):
                 arr[: len(trace), r, 0] = trace
-            s.time_series[label] = arr
-
-    s.blanked_data = {}
-    s.blanked_data_mean = {}
-    s.blanked_data_error = {}
-    s.normalized_data = {}
-    s.normalized_data_mean = {}
-    s.normalized_data_error = {}
-    s.time_series_mean = {}
-    s.time_series_error = {}
-
-    if blanked:
-        for label, traces in blanked.items():
-            arr = np.full((T, len(traces), C), np.nan)
-            for r, trace in enumerate(traces):
-                arr[: len(trace), r, 0] = trace
-            s.blanked_data[label] = arr
-
-    if normalized:
-        for label, traces in normalized.items():
-            arr = np.full((T, len(traces), C), np.nan)
-            for r, trace in enumerate(traces):
-                arr[: len(trace), r, 0] = trace
-            s.normalized_data[label] = arr
-
-    s.calculate_data_source_statistics("time_series")
-    if s.blanked_data:
-        s.calculate_data_source_statistics("blanked_data")
-    if s.normalized_data:
-        s.calculate_data_source_statistics("normalized_data")
+            getattr(s, attr)[label] = arr
+        if data:
+            s.calculate_data_source_statistics(attr)
 
     return s
 

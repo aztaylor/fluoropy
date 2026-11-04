@@ -346,3 +346,93 @@ def test_fold_change_does_not_scale_with_control_brightness():
     np.testing.assert_allclose(
         dim["S"].fold_change["GFP"], bright["S"].fold_change["GFP"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Bug 5: align_replicates_by_od built Samples by hand. It indexed sample.wells
+# by replicate number (so a multi-dose sample kept only its first dose's
+# wells), lost control polarity and fold-change attributes, and left the wells
+# unaligned -- so anything that re-read them, like calculate_fold_change,
+# crashed on the shape mismatch.
+# ---------------------------------------------------------------------------
+
+from fluoropy.utils import align_replicates_by_od  # noqa: E402
+
+ALIGN_T = 30
+
+
+def _growth_plate():
+    """
+    OD rises linearly from a per-well lag; GFP is 100x OD, and 3x that at
+    dose 10. Replicate pairs (C1, C3) and (C2, C4) share a lag, as replicate
+    index r does across doses.
+    """
+    t = np.arange(ALIGN_T, dtype=float)
+    plate = Plate("96", name="p1")
+
+    def put(well_id, sample_type, role, conc, lag, gain=1.0):
+        well = plate[well_id]
+        well.set_sample_info(sample_type, role=role, medium="LB", concentration=conc)
+        well.time_points = t
+        if role == "blank":
+            od = np.zeros(ALIGN_T)
+            gfp = np.zeros(ALIGN_T)
+        else:
+            od = np.where(t >= lag, 0.1 + 0.05 * (t - lag), 0.05)
+            gfp = gain * 100 * od
+        well.add_time_series("OD600", od)
+        well.add_time_series("GFP", gfp)
+
+    put("A1", "blank", "blank", 0, 0)
+    put("A2", "blank", "blank", 0, 0)
+    put("B1", "NC", "negative_control", 0, 2)
+    put("B2", "NC", "negative_control", 0, 4)
+    put("C1", "S", "sample", 0, 2)
+    put("C2", "S", "sample", 0, 6)
+    put("C3", "S", "sample", 10, 3, gain=3.0)
+    put("C4", "S", "sample", 10, 8, gain=3.0)
+    return SampleFrame(plate)
+
+
+def test_alignment_keeps_every_dose():
+    aligned = align_replicates_by_od(_growth_plate(), "OD600", 0.1, min_timepoints=5)
+
+    kept = sorted((w.well_id, w.concentration) for w in aligned["S"].wells)
+    # Before the fix: [('C1', 0.0), ('C2', 0.0)] -- dose 10 silently dropped.
+    assert kept == [("C1", 0.0), ("C2", 0.0), ("C3", 10.0), ("C4", 10.0)]
+
+
+def test_alignment_keeps_control_polarity():
+    aligned = align_replicates_by_od(_growth_plate(), "OD600", 0.1, min_timepoints=5)
+
+    assert aligned["NC"].role == "negative_control"
+    assert aligned["blank"].is_blank
+
+
+def test_alignment_aligns_the_wells_with_the_arrays():
+    aligned = align_replicates_by_od(_growth_plate(), "OD600", 0.1, min_timepoints=5)
+
+    sample = aligned["S"]
+    for conc_idx, wells in enumerate(sample.replicate_wells["OD600"]):
+        for rep_idx, well in enumerate(wells):
+            np.testing.assert_array_equal(
+                well.time_series["OD600"],
+                sample.time_series["OD600"][:, rep_idx, conc_idx],
+            )
+
+
+def test_fold_change_on_an_aligned_frame():
+    aligned = align_replicates_by_od(_growth_plate(), "OD600", 0.1, min_timepoints=5)
+
+    # A negligible alpha makes GFP / (alpha + OD) exactly 100 * gain, so dose
+    # 10 is exactly 3x dose 0 at every aligned timepoint.
+    aligned.calculate_fold_change("GFP", alpha=1e-12)
+
+    np.testing.assert_allclose(aligned["S"].fold_change["GFP"], 3.0)
+
+
+def test_alignment_takes_blanks_from_roles():
+    """Without blanks=, blank wells never cross the OD threshold. That raised."""
+    aligned = align_replicates_by_od(_growth_plate(), "OD600", 0.1, min_timepoints=5)
+
+    assert aligned["blank"].time_series["OD600"].shape[1] == 2
