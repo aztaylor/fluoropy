@@ -751,14 +751,16 @@ class SampleFrame:
         pool_controls: bool = False,
     ) -> None:
         """
-        Calculate log fold change of samples by negative control at each timepoint.
+        Calculate fold change (a plain ratio, not log) at each timepoint.
 
         Process flow (applied to individual replicates):
         1. Subtract blank from sample and control (blank_subtracted_timeseries)
         2. Normalize by OD: measurement / (alpha + OD) (normalized_timeseries)
-        3. For each non-zero concentration:
-           - Calculate ratio of normalized sample to normalized zero-concentration control
-           - Result: fold change at each timepoint
+        3. For each non-zero concentration C, divide each replicate by the mean
+           of the sample's own zero-concentration wells: Sample_C / Sample_0.
+        4. If the control was also run at C, divide by its change there,
+           Control_C / Control_0, to remove any effect of the dose itself.
+           A control run only at zero dose leaves Sample_C / Sample_0 as is.
 
         Stores the result in ``sample.fold_change[measurement]`` as an array of
         shape ``(n_timepoints, n_replicates, n_concentrations)``, matching
@@ -895,8 +897,8 @@ class SampleFrame:
         Process for each replicate:
         1. Normalize by OD: (measurement - blank) / (alpha + OD - blank_OD)
         2. Within-sample fold change: normalized_sample_C / mean normalized_sample_0
-        3. Divide by the control's own change at C (Control_C / Control_0), or,
-           where the control has no wells at C, by Control_0.
+        3. Where the control was also run at C, divide by its own change there,
+           Control_C / Control_0. Otherwise the result is Sample_C / Sample_0.
 
         Every reference is per plate unless ``pool_controls``: a replicate on
         plate P is compared with its sample's zero-dose wells on P, the
@@ -996,25 +998,30 @@ class SampleFrame:
                 within_sample = normalized(well, sample_blank) / on_plate(
                     sample_zero, plate, f"zero-concentration wells of '{sample.name}'"
                 )
-                control_zero_here = on_plate(
+                if control_at_conc is None:
+                    # The control was not run at this dose -- the usual case
+                    # for a negative control -- so there is no control effect
+                    # to correct for: fold change is Sample_C / Sample_0.
+                    #
+                    # This used to divide by Control_0 as well. That is a
+                    # ratio over a normalized fluorescence, so the result had
+                    # units and scaled with the control's brightness: a 3x
+                    # induction came out as 0.0138.
+                    replicates.append(within_sample)
+                    continue
+
+                # The control was run at this dose too, so remove whatever the
+                # dose does to it: (Sample_C / Sample_0) / (Control_C / Control_0)
+                control_change = on_plate(
+                    control_at_conc,
+                    plate,
+                    f"wells of control '{control.name}' at {conc}",
+                ) / on_plate(
                     control_zero,
                     plate,
                     f"zero-concentration wells of control '{control.name}'",
                 )
-                if control_at_conc is not None:
-                    # (Sample_C / Sample_0) / (Control_C / Control_0)
-                    denominator = (
-                        on_plate(
-                            control_at_conc,
-                            plate,
-                            f"wells of control '{control.name}' at {conc}",
-                        )
-                        / control_zero_here
-                    )
-                else:
-                    # Control lacks this concentration: (Sample_C / Sample_0) / Control_0
-                    denominator = control_zero_here
-                replicates.append(within_sample / denominator)
+                replicates.append(within_sample / control_change)
             fold_change_by_conc[conc] = replicates
 
         if not fold_change_by_conc:

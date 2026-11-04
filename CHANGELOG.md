@@ -157,6 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its first well. Each replicate now uses its own plate's blank, zero-dose
   wells and control wells. A plate with no blank is reported and the sample
   skipped, rather than blanked against another plate.
+- **Fold change had units when the control wasn't run at the dose.** That is
+  the usual case for a negative control, and `calculate_fold_change()` divided
+  `Sample_C / Sample_0` by the control's normalized zero-dose signal as well,
+  so results scaled with the control's brightness: a 3× induction came out as
+  0.0138. It is now `Sample_C / Sample_0`. Where the control *was* run at the
+  dose, it is still divided by `Control_C / Control_0`. **Fold-change values
+  computed before this fix are wrong wherever the control lacked the dose.**
 - **`calculate_fold_change()` could take a positive control as the
   reference**, and ignored `matched_control`. It took the first sample with
   `is_control` set. It now uses `matched_control` when set, otherwise the one

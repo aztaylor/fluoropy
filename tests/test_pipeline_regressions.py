@@ -299,3 +299,50 @@ def test_fold_change_never_uses_a_positive_control_as_reference(caplog):
 
     assert "GFP" not in frame["S"].fold_change
     assert "negative control" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Bug 3: when the control had no wells at a dose -- the usual case, a negative
+# control is typically run at zero dose only -- fold change divided the
+# within-sample ratio by the control's normalized signal. A ratio over a
+# fluorescence value has units, so the answer scaled with brightness: a 3x
+# induction came out as 0.0138.
+# ---------------------------------------------------------------------------
+
+
+def _zero_dose_control_plate(control_gfp=100.0):
+    plate = Plate("96", name="p1")
+    for well_id in ("A1", "A2"):
+        _put(plate, well_id, "blank", "blank", gfp=0, od=0.05)
+    for well_id in ("B1", "B2"):
+        _put(
+            plate,
+            well_id,
+            "NC",
+            "negative_control",
+            gfp=control_gfp,
+            concentration=0,
+        )
+    for well_id, conc, gfp in (("C1", 0, 100), ("C2", 0, 100)):
+        _put(plate, well_id, "S", "sample", gfp=gfp, concentration=conc)
+    for well_id, conc, gfp in (("C3", 10, 300), ("C4", 10, 300)):
+        _put(plate, well_id, "S", "sample", gfp=gfp, concentration=conc)
+    return SampleFrame(plate)
+
+
+def test_fold_change_without_a_control_dose_is_the_within_sample_ratio():
+    frame = _zero_dose_control_plate()
+    frame.calculate_fold_change("GFP")
+
+    np.testing.assert_allclose(frame["S"].fold_change["GFP"], 3.0)
+
+
+def test_fold_change_does_not_scale_with_control_brightness():
+    dim = _zero_dose_control_plate(control_gfp=50.0)
+    bright = _zero_dose_control_plate(control_gfp=5000.0)
+    dim.calculate_fold_change("GFP")
+    bright.calculate_fold_change("GFP")
+
+    np.testing.assert_allclose(
+        dim["S"].fold_change["GFP"], bright["S"].fold_change["GFP"]
+    )
