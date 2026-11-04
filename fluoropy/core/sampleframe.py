@@ -288,10 +288,11 @@ class SampleFrame:
             if sample.time_series and n_measurements > 0:
                 # Get the first measurement type to check dimensions
                 first_measurement = next(iter(sample.time_series.values()))
-                if (
-                    hasattr(first_measurement, "shape")
-                    and len(first_measurement.shape) == 2
-                ):
+                if getattr(first_measurement, "ndim", 0) == 3:
+                    # (timepoints, replicates, concentrations). This only
+                    # checked for 2-D, so it always reported one concentration.
+                    n_timepoints, _, n_concentrations = first_measurement.shape
+                elif getattr(first_measurement, "ndim", 0) == 2:
                     n_timepoints, n_concentrations = first_measurement.shape
                 elif hasattr(first_measurement, "__len__"):
                     n_timepoints = len(first_measurement)
@@ -335,10 +336,11 @@ class SampleFrame:
             # Add a note if statistics haven't been calculated
             if not sample.time_series:
                 summary_lines.append(
-                    "  Note: Statistics not yet calculated. Call calculate_all_statistics() first."
+                    "  Note: no time series yet. Wells need measurements "
+                    "before samples have data."
                 )
 
-        return "\\n".join(summary_lines)
+        return "\n".join(summary_lines)
 
     def _initialize_samples(self):
         """
@@ -538,6 +540,21 @@ class SampleFrame:
         """
         sample.calculate_data_source_statistics(data_source, measurements, error_type)
 
+    def _dose_molecules(self) -> set:
+        """
+        Every molecule dosed across a non-blank sample in this frame.
+
+        Taken frame-wide so that a sample and its blank leave the same
+        molecules out of their matching keys: a blank's own wells usually all
+        sit at zero dose, so on its own it would not know which molecule the
+        dose series is.
+        """
+        doses: set = set()
+        for sample in self.samples.values():
+            if not sample.is_blank:
+                doses |= sample.dose_molecules
+        return doses
+
     def calculate_blank_subtracted_timeseries(
         self,
         measurement_types: Optional[List[str]] = None,
@@ -569,12 +586,17 @@ class SampleFrame:
             If True, blanks must also match on inducer concentrations.
             If False, only medium, antibiotics and modifications are used.
 
-            Pass False when the dose series is an inducer. A sample's inducers
-            are taken from its first well, so with True a sample whose first
-            well carries a non-zero dose finds no blank.
+            Either way, the dose series itself -- each sample's molecule of
+            interest, and anything whose amount varies across a sample's wells
+            -- is left out of the match, since one sample spans many doses. A
+            blank laid out at each dose is matched dose by dose instead.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
+
+        # Dose molecules vary across wells, so they are not a condition to
+        # match on; a blank laid out at each dose is matched per well instead.
+        doses = self._dose_molecules()
 
         # Group blanks by condition key for efficient lookup
         # Note: Blank keys always exclude plate_id since blanks are merged across plates
@@ -585,6 +607,7 @@ class SampleFrame:
                 key = sample.get_matching_key(
                     pool_across_plates=True,  # Always True for blanks (they're merged)
                     match_inducers=match_inducers,
+                    ignore=doses,
                 )
                 blanks_by_condition[key] = sample
 
@@ -597,6 +620,7 @@ class SampleFrame:
             blank_key = sample.get_matching_key(
                 pool_across_plates=True,  # Always True for blank matching (blanks are merged)
                 match_inducers=match_inducers,
+                ignore=doses,
             )
             blank_sample = blanks_by_condition.get(blank_key)
 
@@ -906,11 +930,14 @@ class SampleFrame:
         self, sample: Sample, per_plate: bool
     ) -> Optional[_BlankBaselines]:
         """Baselines from the blank matching ``sample``'s medium and additives."""
-        key = sample.get_matching_key(pool_across_plates=True, match_inducers=False)
+        doses = self._dose_molecules()
+        key = sample.get_matching_key(
+            pool_across_plates=True, match_inducers=False, ignore=doses
+        )
         blank = None
         for candidate in self.samples.values():
             if candidate.is_blank and key == candidate.get_matching_key(
-                pool_across_plates=True, match_inducers=False
+                pool_across_plates=True, match_inducers=False, ignore=doses
             ):
                 blank = candidate
         return _BlankBaselines(blank, per_plate) if blank is not None else None

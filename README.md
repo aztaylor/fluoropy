@@ -70,8 +70,7 @@ for well in plate.get_wells_by_sample("NC"):
 
 frame = SampleFrame(plate)
 
-# The dose here is an inducer (aTc), so don't require blanks to match it.
-frame.calculate_blank_subtracted_timeseries(["GFP", "OD600"], match_inducers=False)
+frame.calculate_blank_subtracted_timeseries(["GFP", "OD600"])
 frame.calculate_normalized_timeseries(od_measurement="OD600", alpha=0.01)
 frame.calculate_normalized_timeseries_statistics(error_type="sem")
 
@@ -84,9 +83,11 @@ frame.calculate_fold_change_statistics(error_type="sem")
 sample.fold_change_mean["GFP"]       # (timepoints, non-zero concentrations)
 ```
 
-`match_inducers=True`, the default, matches blanks on the *first well's*
-inducer dose, so with a dose series in an inducer it finds no blank for most
-samples and logs a warning. See [Known issues](CHANGELOG.md#known-issues).
+Blanks are matched on medium, antibiotics, inducers and other additives —
+except the dose series itself (`primary_molecule`, or anything whose amount
+varies within a sample), since one sample spans many doses. A blank laid out at
+each dose is matched dose by dose; one run only at zero dose applies to all.
+Pass `match_inducers=False` to ignore inducers altogether.
 
 ### Array shapes
 
@@ -198,7 +199,21 @@ A,s14,s14,s14,...
 B,NC,NC,NC,...
 ```
 
-One file per attribute (samples, media, antibiotics, each inducer).
+One file per attribute: samples, media, and one per molecule, whose cells are
+that molecule's amount in each well. An empty cell means no sample, or an
+amount of 0.
+
+On an existing plate, molecule layouts load by name:
+
+```python
+plate.load_plate_layouts(
+    media_csv="layouts/media.csv",
+    antibiotics_csv={"Kan": "layouts/kan.csv"},
+    inducer_csvs={"aTc": "layouts/atc.csv"},
+)
+plate.load_layout_csv("layouts/iptg.csv", "IPTG")                     # an inducer
+plate.load_layout_csv("layouts/carb.csv", "Carb", category="antibiotic")
+```
 
 ## Documentation
 

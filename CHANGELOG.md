@@ -83,6 +83,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fluoropy.utils` additions.** `convert_units()` handles mass
+  concentrations (g/L, mg/mL, µg/mL, ng/mL, ...), converts between molar and
+  mass units given `molecular_weight`, and accepts µ, μ or u for micro.
+  `validate_well_type()` accepts the well roles and their aliases, as well as
+  `"standard"` and `"reference"`. `validate_data_consistency()` gains
+  `measurement`, `timepoint_idx` and `max_cv`. `Plate(plate_format=384)`
+  accepts an integer.
+- **Plate dimensions live in one place**, `fluoropy.core.well.PLATE_DIMENSIONS`,
+  used by `Plate` and the utils; the utils' own row-letter converters are gone
+  in favour of the well-ID helpers.
+- **Antibiotic layouts are amounts, by name.** `load_plate_layouts()` takes
+  `antibiotics_csv={'Kan': path}` like `inducer_csvs`, and gains
+  `modification_csvs`; `load_layout_csv(path, name, category=...)` loads one
+  into inducers, antibiotics or modifications. The old forms — a single
+  antibiotics path, or `load_layout_csv(path, 'antibiotics')` — stored cell
+  text where amounts belong and broke every later step; they now raise with
+  the new form.
+- **`Plate.get_plate_matrix()`** defaults to `"concentration"` and accepts a
+  measurement name with `timepoint_idx`. Its old default, `"fluorescence"`,
+  returned all NaN and now raises.
+- **`print_concentration_summary()` / `print_sample_summary()` print.** Since
+  the move to logging they showed nothing unless logging was configured.
 - **Fold change refuses to guess between controls.** When several samples
   could be the reference — two negative controls, say, or two controls loaded
   through `Plate(controls=[...])`, which carry no polarity —
@@ -145,6 +167,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fluoropy.utils` validators and converters** did not do what their
+  docstrings showed:
+  - `validate_data_consistency()` read `well.well_type` and
+    `well.fluorescence`, which no longer exist, so it raised `AttributeError`
+    on any wells. Its control check pooled negative and positive controls into
+    one CV, which they fail by design, and its `"concentrations"` check did
+    nothing. It now judges each control on its own for a given `measurement`,
+    and checks concentrations.
+  - `validate_fluorescence(-50, allow_negative=True)` — its own example —
+    raised, because `min_value` defaulted to 0. `min_value` is now optional.
+  - `validate_concentration()` / `validate_fluorescence()` rejected numpy
+    integers and accepted `True`.
+  - `validate_well_position()` rejected lower-case positions.
+  - `convert_units()` showed a µM-to-mg/mL example it could not do.
+  The docstring examples are now run by the test suite.
+- **Blank matching keyed on the first well's dose.** A sample takes its
+  condition dicts from its first well, so when the dose series was an inducer
+  or antibiotic, a sample whose first well carried a non-zero dose found no
+  blank under the default `match_inducers=True` and was left unblanked. A
+  dilution series starting at its highest dose — the README's own example —
+  hit this. Dose molecules are now left out of the matching key on both
+  sides, and a blank laid out at each dose is matched dose by dose.
+- **Empty layout cells became a sample named `'nan'`**, and empty amount
+  cells became NaN, which never matches anything. Empty cells now mean no
+  sample, or an amount of 0.
+- **`import_results()` could drop the last reads.** It sized arrays as
+  `int(run_time / sampling_rate)` — `int(0.7 / 0.1)` is 6 — and skipped any
+  row past that, including a read at t = 0. Every timed row is now kept.
+  The file is now closed after reading.
+- **`SampleFrame.summary()`** printed a literal `\n` instead of line breaks
+  and always reported one concentration.
+- **SEM over uneven replicate counts was too small.**
+  `calculate_data_source_statistics(error_type='sem')` divided by the padded
+  replicate count; it now counts the replicates present. This is the SEM for
+  blanked, normalized and fold-change data.
+- **Rows past Z** broke `Plate.to_dataframe()` and `plate[("AA", 0)]`.
+- **Tests that could not fail.** Several printed "SUCCESS" or "FAILURE", or
+  caught exceptions, and passed regardless. They now assert.
 - **Blank subtraction crashed on any plate with inducers or antibiotics.**
   Matching keys called `tuple()` on each condition value, but wells store them
   as plain floats — exactly what the layout loaders and
@@ -248,34 +308,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-Found in review; not yet fixed.
-
-- **`match_inducers=True` matches blanks on the first well's inducer dose.** A
-  sample takes its inducers from its first well, so when the dose series is an
-  inducer, a sample whose first well carries a non-zero dose finds no blank.
-  Pass `match_inducers=False` to `calculate_blank_subtracted_timeseries()`.
-  `calculate_fold_change()` is unaffected — it matches blanks without inducers
-  — but it re-runs blank subtraction with the default internally, so it may
-  log a spurious "No blank found" warning.
-- **`Plate.load_layout_csv(..., 'antibiotics')` stores a string** in
-  `well.antibiotics`, which is a dict everywhere else.
-- **Empty cells in a layout CSV likely become the sample type `'nan'`**,
-  creating a sample of empty wells. Unconfirmed against a real layout.
-- **`import_results()` may drop the last read.** It sizes the time axis as
-  `int(run_time / sampling_rate)`, which truncates and does not count the
-  reading at t = 0. Unconfirmed against a real export.
-- **`SampleFrame.summary()`** prints a literal `\n` instead of line breaks, and
-  always reports one concentration.
-- **SEM in `calculate_data_source_statistics()`** divides by the padded
-  replicate count rather than the number of valid replicates, so it is too
-  small when replicate counts are uneven.
-- **Rows past Z** still break `Plate.to_dataframe()` and `plate[("AA", 1)]`,
-  which parse well IDs by hand.
-- **`Plate.get_plate_matrix("fluorescence")`** reads an attribute that no
-  longer exists and always returns NaN.
-- **The `print_*` methods print nothing** unless logging is configured, since
-  the move to logging.
-- **Five test files can't fail**: they print results instead of asserting
-  them.
+None outstanding from the review.
 
 The suite carries no `xfail` markers.

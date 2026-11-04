@@ -436,3 +436,129 @@ def test_alignment_takes_blanks_from_roles():
     aligned = align_replicates_by_od(_growth_plate(), "OD600", 0.1, min_timepoints=5)
 
     assert aligned["blank"].time_series["OD600"].shape[1] == 2
+
+
+# ---------------------------------------------------------------------------
+# Blank matching keyed on the first well's dose. A Sample takes its condition
+# dicts from its first well, so when the dose series *is* an inducer (or an
+# antibiotic), a sample whose first well carried a non-zero dose found no blank
+# and was silently left unblanked. Dose molecules are now left out of the key.
+# ---------------------------------------------------------------------------
+
+
+def _dose_layout_plate(dose_in="inducers", extra=None, blanks=((0.0, 10.0),)):
+    """Highest dose in the first well, as a dilution series usually is."""
+    extra = extra or {}
+    plate = Plate("96", name="p1")
+    for i, (dose, background) in enumerate(blanks):
+        for col in (1, 2):
+            _put(
+                plate,
+                f"{'AB'[i]}{col}",
+                "blank",
+                "blank",
+                gfp=background,
+                od=0.05,
+                **{dose_in: {"aTc": dose, **extra}},
+                moi="aTc",
+            )
+    for well_id, dose, gfp in (
+        ("C1", 100.0, 310),
+        ("C2", 100.0, 310),
+        ("C3", 0.0, 110),
+        ("C4", 0.0, 110),
+    ):
+        _put(
+            plate,
+            well_id,
+            "S",
+            "sample",
+            gfp=gfp,
+            **{dose_in: {"aTc": dose, **extra}},
+            moi="aTc",
+        )
+    return SampleFrame(plate)
+
+
+def test_blank_found_when_the_first_well_carries_a_dose():
+    frame = _dose_layout_plate()
+    frame.calculate_blank_subtracted_timeseries(["GFP"])  # match_inducers=True
+
+    sample = frame["S"]
+    expected = np.where(sample.concentrations == 100.0, 300.0, 100.0)
+    np.testing.assert_allclose(sample.blanked_data["GFP"][0], [expected, expected])
+
+
+def test_blank_found_when_the_dose_is_an_antibiotic():
+    """Antibiotics are always matched, so this had no workaround at all."""
+    frame = _dose_layout_plate(dose_in="antibiotics")
+    frame.calculate_blank_subtracted_timeseries(["GFP"])
+
+    assert "GFP" in frame["S"].blanked_data
+
+
+def test_constant_inducers_are_still_matched_alongside_a_dose():
+    plate = Plate("96", name="p1")
+    for well_id, iptg, background in (
+        ("A1", 0.5, 10),
+        ("A2", 0.5, 10),
+        ("B1", 0.0, 999),
+        ("B2", 0.0, 999),
+    ):
+        _put(
+            plate,
+            well_id,
+            "blank" if iptg else "wrong_blank",
+            "blank",
+            gfp=background,
+            od=0.05,
+            inducers={"aTc": 0.0, "IPTG": iptg},
+            moi="aTc",
+        )
+    for well_id, dose, gfp in (("C1", 100.0, 310), ("C2", 0.0, 110)):
+        _put(
+            plate,
+            well_id,
+            "S",
+            "sample",
+            gfp=gfp,
+            inducers={"aTc": dose, "IPTG": 0.5},
+            moi="aTc",
+        )
+    frame = SampleFrame(plate)
+
+    frame.calculate_blank_subtracted_timeseries(["GFP"])
+
+    sample = frame["S"]
+    expected = np.where(sample.concentrations == 100.0, 300.0, 100.0)
+    np.testing.assert_allclose(sample.blanked_data["GFP"][0, 0], expected)
+
+
+def test_blank_laid_out_at_each_dose_is_matched_dose_by_dose():
+    """An autofluorescent inducer: the blank is run at every dose."""
+    frame = _dose_layout_plate(blanks=((0.0, 10.0), (100.0, 60.0)))
+    frame.calculate_blank_subtracted_timeseries(["GFP"])
+
+    sample = frame["S"]
+    expected = np.where(sample.concentrations == 100.0, 250.0, 100.0)
+    np.testing.assert_allclose(sample.blanked_data["GFP"][0, 0], expected)
+
+
+def test_fold_change_on_a_dose_layout_logs_no_missing_blank(caplog):
+    frame = _dose_layout_plate()
+    for well_id in ("D1", "D2"):
+        _put(
+            frame.plates[0],
+            well_id,
+            "NC",
+            "negative_control",
+            gfp=110,
+            inducers={"aTc": 0.0},
+            moi="aTc",
+        )
+    frame = SampleFrame(frame.plates)
+
+    frame.calculate_fold_change("GFP")
+
+    assert "No blank found" not in caplog.text
+    np.testing.assert_allclose(frame["S"].fold_change["GFP"], 3.0)

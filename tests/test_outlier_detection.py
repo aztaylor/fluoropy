@@ -1,88 +1,65 @@
-#!/usr/bin/env python3
 """
-Test script to verify outlier detection functionality in Plate class.
+IQR outlier detection on Plate.
+
+This used to print "SUCCESS" or "FAILURE" and pass either way.
 """
+
+import pytest
 
 from fluoropy.core.plate import Plate
 
+GROUP = "sample_1_10.0"
 
-def test_outlier_detection():
-    """Test the outlier detection functionality."""
 
-    # Create a 96-well plate
+@pytest.fixture
+def plate():
+    """Six replicates of one sample; A5 reads 15 where the rest read ~10."""
     plate = Plate("96", name="test_plate")
-
-    # Create some test data with known outliers
-    # We'll create 6 wells for "sample_1" at concentration 10.0
-    # Values: [10.0, 10.1, 10.2, 10.3, 15.0, 10.4] where 15.0 is clearly an outlier
-    test_wells_data = [
-        ("A1", "sample_1", 10.0, [10.0, 11.0, 12.0]),
-        ("A2", "sample_1", 10.0, [10.1, 11.1, 12.1]),
-        ("A3", "sample_1", 10.0, [10.2, 11.2, 12.2]),
-        ("A4", "sample_1", 10.0, [10.3, 11.3, 12.3]),
-        ("A5", "sample_1", 10.0, [15.0, 16.0, 17.0]),  # Outlier well
-        ("A6", "sample_1", 10.0, [10.4, 11.4, 12.4]),
-    ]
-
-    # Set up wells with time series data
-    for well_id, sample_type, concentration, time_series_data in test_wells_data:
+    for well_id, first in (
+        ("A1", 10.0),
+        ("A2", 10.1),
+        ("A3", 10.2),
+        ("A4", 10.3),
+        ("A5", 15.0),
+        ("A6", 10.4),
+    ):
         well = plate[well_id]
-        well.set_sample_info(sample_type=sample_type, concentration=concentration)
-        well.add_time_series("OD600", time_series_data)
+        well.set_sample_info(sample_type="sample_1", concentration=10.0)
+        well.add_time_series("OD600", [first, first + 1, first + 2])
+    return plate
 
-    print("=== Testing Outlier Detection ===")
-    print(f"Created {len(test_wells_data)} wells for sample_1 at concentration 10.0")
-    print(f"Values at timepoint 0: {[data[3][0] for data in test_wells_data]}")
-    print("Expected outlier: A5 with value 15.0")
-    print()
 
-    # Test calculate_timepoint_statistics
-    print("1. Testing calculate_timepoint_statistics:")
+def test_timepoint_statistics_flag_only_the_outlier(plate):
     stats = plate.calculate_timepoint_statistics("OD600", timepoint_idx=0)
 
-    group_key = "sample_1_10.0"
-    if group_key in stats:
-        group_stats = stats[group_key]
-        print(f"   Group: {group_key}")
-        print(f"   Mean: {group_stats['mean']:.2f}")
-        print(f"   Q25: {group_stats['q25']:.2f}")
-        print(f"   Q75: {group_stats['q75']:.2f}")
-        print(f"   IQR: {group_stats['iqr']:.2f}")
-        print(f"   Outlier count: {group_stats['outlier_count']}")
-        print(f"   Outlier wells: {group_stats['outlier_wells']}")
-    print()
+    group = stats[GROUP]
+    assert group["count"] == 6
+    assert group["outlier_count"] == 1
+    assert [o["well_id"] for o in group["outlier_wells"]] == ["A5"]
+    assert group["q25"] < 10.3 < group["q75"] + 1.5 * group["iqr"] < 15.0
 
-    # Test get_timepoint_summary_table
-    print("2. Testing get_timepoint_summary_table:")
-    df = plate.get_timepoint_summary_table("OD600", timepoint_idx=0)
-    print(df)
-    print()
 
-    # Test get_outlier_wells
-    print("3. Testing get_outlier_wells:")
+def test_get_outlier_wells_reports_the_outlier(plate):
     outliers = plate.get_outlier_wells("OD600", timepoint_idx=0)
-    for group, outlier_list in outliers.items():
-        print(f"   {group}: {len(outlier_list)} outliers")
-        for outlier in outlier_list:
-            print(
-                f"     - {outlier['well_id']}: value={outlier['value']:.2f}, z_score={outlier['z_score']:.2f}"
-            )
 
-    print("\n=== Test Complete ===")
-
-    # Verify our expected results
-    if group_key in stats and stats[group_key]["outlier_count"] > 0:
-        outlier_well_ids = [
-            outlier["well_id"] for outlier in stats[group_key]["outlier_wells"]
-        ]
-        if "A5" in outlier_well_ids:
-            print("✅ SUCCESS: A5 correctly identified as outlier!")
-        else:
-            print("❌ FAILURE: A5 not identified as outlier")
-            print(f"   Identified outliers: {outlier_well_ids}")
-    else:
-        print("❌ FAILURE: No outliers detected")
+    assert [o["well_id"] for o in outliers[GROUP]] == ["A5"]
+    assert outliers[GROUP][0]["value"] == pytest.approx(15.0)
+    assert outliers[GROUP][0]["z_score"] > 1.5
 
 
-if __name__ == "__main__":
-    test_outlier_detection()
+def test_summary_table_has_a_row_for_the_group(plate):
+    table = plate.get_timepoint_summary_table("OD600", timepoint_idx=0)
+
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["count"] == 6
+    assert row["outlier_count"] == 1
+    assert "A5" in row["outlier_wells_formatted"]
+
+
+def test_no_outliers_in_a_tight_group(plate):
+    plate["A5"].time_series["OD600"][0] = 10.25
+
+    stats = plate.calculate_timepoint_statistics("OD600", timepoint_idx=0)
+
+    assert stats[GROUP]["outlier_count"] == 0

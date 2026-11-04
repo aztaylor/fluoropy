@@ -89,6 +89,12 @@ array slot) or `sample.plate_ids`. `pool_controls=True` is the explicit opt-out.
 concentration axis and the role consistent. To transform a sample, transform
 copies of its wells and construct a new one, as `align_replicates_by_od` does.
 
+**Doses are not conditions.** A sample spans many doses of its molecule of
+interest, so the sample-level condition dicts (taken from its first well) say
+nothing true about that molecule. Blank matching leaves every dose molecule in
+the frame out of its key (`SampleFrame._dose_molecules`) and matches doses per
+well instead.
+
 **Fold change** is `Sample_C / Sample_0`, divided by `Control_C / Control_0`
 only where the control was run at that dose — always a dimensionless ratio. The
 reference control comes from `SampleFrame._reference_control`: `matched_control`,
@@ -96,11 +102,13 @@ else the one negative control, never a positive one, and an error rather than a
 guess when several qualify.
 
 **Well IDs.** Build with `well_id(row, col)` and take apart with
-`parse_well_id(id)`. Do not use `chr(ord('A') + row)` — 1536-well plates have 32
+`parse_well_id(id)`; plate sizes come from `PLATE_DIMENSIONS`, all in
+`core/well.py`. Do not use `chr(ord('A') + row)` — 1536-well plates have 32
 rows and that runs off the end of the alphabet.
 
 **Logging, not printing.** Use the module `logger`. Progress goes to
-`logger.info`, problems to `logger.warning`. The library is silent unless the
+`logger.info`, problems to `logger.warning`. The exception is a method whose
+job is to show something (`Plate.print_sample_summary()`), which prints. The library is silent unless the
 caller configures logging:
 
 ```python
