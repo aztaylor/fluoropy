@@ -17,6 +17,13 @@ import numpy as np
 
 _WELL_ID_PATTERN = re.compile(r"^([A-Za-z]+)(\d+)$")
 
+#: (rows, columns) for each supported plate format. The one place these live.
+PLATE_DIMENSIONS: Dict[str, Tuple[int, int]] = {
+    "96": (8, 12),
+    "384": (16, 24),
+    "1536": (32, 48),
+}
+
 
 def row_label(row: int) -> str:
     """

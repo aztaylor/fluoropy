@@ -11,8 +11,9 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
+from ..utils.helpers import parse_plate_format
 from ..utils.import_data import import_results
-from .well import Well, row_index
+from .well import PLATE_DIMENSIONS, Well, row_index
 from .well import well_id as make_well_id
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,8 @@ class Plate:
         controls : List[str], optional
             List of control sample names for automatic classification
         """
+        # Accept 384 as well as "384".
+        plate_format = parse_plate_format(plate_format)
         self.format = plate_format
         self.name = name
         self.plate_id = name  # Alias for backward compatibility
@@ -149,21 +152,9 @@ class Plate:
         self.global_time_points: Optional[np.ndarray] = None
         self.measurements: List[str] = []  # List of available measurement types
 
-        # Set plate dimensions
-        if plate_format == "96":
-            self.rows, self.cols = 8, 12
-            self.columns = 12  # Alias for backward compatibility
-            self.plate_format = "96"  # For consistency
-        elif plate_format == "384":
-            self.rows, self.cols = 16, 24
-            self.columns = 24
-            self.plate_format = "384"
-        elif plate_format == "1536":
-            self.rows, self.cols = 32, 48
-            self.columns = 48
-            self.plate_format = "1536"
-        else:
-            raise ValueError(f"Unsupported plate format: {plate_format}")
+        self.rows, self.cols = PLATE_DIMENSIONS[plate_format]
+        self.columns = self.cols  # Alias for backward compatibility
+        self.plate_format = plate_format  # For consistency
 
         # Initialize all wells for the plate format
         self._initialize_wells()

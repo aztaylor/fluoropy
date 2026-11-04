@@ -102,7 +102,8 @@ else the one negative control, never a positive one, and an error rather than a
 guess when several qualify.
 
 **Well IDs.** Build with `well_id(row, col)` and take apart with
-`parse_well_id(id)`. Do not use `chr(ord('A') + row)` — 1536-well plates have 32
+`parse_well_id(id)`; plate sizes come from `PLATE_DIMENSIONS`, all in
+`core/well.py`. Do not use `chr(ord('A') + row)` — 1536-well plates have 32
 rows and that runs off the end of the alphabet.
 
 **Logging, not printing.** Use the module `logger`. Progress goes to

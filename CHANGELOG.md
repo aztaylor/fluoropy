@@ -83,6 +83,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fluoropy.utils` additions.** `convert_units()` handles mass
+  concentrations (g/L, mg/mL, µg/mL, ng/mL, ...), converts between molar and
+  mass units given `molecular_weight`, and accepts µ, μ or u for micro.
+  `validate_well_type()` accepts the well roles and their aliases, as well as
+  `"standard"` and `"reference"`. `validate_data_consistency()` gains
+  `measurement`, `timepoint_idx` and `max_cv`. `Plate(plate_format=384)`
+  accepts an integer.
+- **Plate dimensions live in one place**, `fluoropy.core.well.PLATE_DIMENSIONS`,
+  used by `Plate` and the utils; the utils' own row-letter converters are gone
+  in favour of the well-ID helpers.
 - **Antibiotic layouts are amounts, by name.** `load_plate_layouts()` takes
   `antibiotics_csv={'Kan': path}` like `inducer_csvs`, and gains
   `modification_csvs`; `load_layout_csv(path, name, category=...)` loads one
@@ -157,6 +167,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fluoropy.utils` validators and converters** did not do what their
+  docstrings showed:
+  - `validate_data_consistency()` read `well.well_type` and
+    `well.fluorescence`, which no longer exist, so it raised `AttributeError`
+    on any wells. Its control check pooled negative and positive controls into
+    one CV, which they fail by design, and its `"concentrations"` check did
+    nothing. It now judges each control on its own for a given `measurement`,
+    and checks concentrations.
+  - `validate_fluorescence(-50, allow_negative=True)` — its own example —
+    raised, because `min_value` defaulted to 0. `min_value` is now optional.
+  - `validate_concentration()` / `validate_fluorescence()` rejected numpy
+    integers and accepted `True`.
+  - `validate_well_position()` rejected lower-case positions.
+  - `convert_units()` showed a µM-to-mg/mL example it could not do.
+  The docstring examples are now run by the test suite.
 - **Blank matching keyed on the first well's dose.** A sample takes its
   condition dicts from its first well, so when the dose series was an inducer
   or antibiotic, a sample whose first well carried a non-zero dose found no
@@ -283,8 +308,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-- **`utils/validation.py`, `helpers.py` and `conversions.py`** are exported
-  but used nowhere in the package and barely tested; `validation.py` has its
-  own row-letter parser. Whether to keep them is undecided.
+None outstanding from the review.
 
 The suite carries no `xfail` markers.
