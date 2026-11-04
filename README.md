@@ -21,8 +21,11 @@ git clone https://github.com/aztaylor/fluoropy.git
 cd fluoropy
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,viz]"
+pre-commit install   # black, isort and flake8 on every commit
 pytest
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the checks CI runs.
 
 ## The pipeline
 
@@ -60,16 +63,30 @@ plate = Plate(
     blanks=["blank"],
 )
 
+# `controls=` marks wells as controls without saying which kind. Say which one
+# is the no-effect reference, so fold change knows what to compare against.
+for well in plate.get_wells_by_sample("NC"):
+    well.role = "negative_control"
+
 frame = SampleFrame(plate)
 
-frame.calculate_blank_subtracted_timeseries(["GFP", "OD600"])
+# The dose here is an inducer (aTc), so don't require blanks to match it.
+frame.calculate_blank_subtracted_timeseries(["GFP", "OD600"], match_inducers=False)
 frame.calculate_normalized_timeseries(od_measurement="OD600", alpha=0.01)
 frame.calculate_normalized_timeseries_statistics(error_type="sem")
 
 sample = frame["s14"]
 sample.normalized_data_mean["GFP"]   # (timepoints, concentrations)
 sample.concentrations                # labels for that last axis
+
+frame.calculate_fold_change("GFP")   # blanks and normalizes itself
+frame.calculate_fold_change_statistics(error_type="sem")
+sample.fold_change_mean["GFP"]       # (timepoints, non-zero concentrations)
 ```
+
+`match_inducers=True`, the default, matches blanks on the *first well's*
+inducer dose, so with a dose series in an inducer it finds no blank for most
+samples and logs a warning. See [Known issues](CHANGELOG.md#known-issues).
 
 ### Array shapes
 
@@ -88,6 +105,61 @@ automatically; a mismatch raises rather than silently mislabelling.
 `fold_change` follows the same layout, with one wrinkle — its concentration
 axis excludes zero, since the zero-concentration wells are the within-sample
 reference. It is labelled by `fold_change_concentrations`.
+
+### Fold change
+
+For each replicate at a non-zero concentration *C*, after blank subtraction and
+OD normalization:
+
+```
+fold change = Sample_C / Sample_0
+```
+
+where `Sample_0` is the mean of the same sample's zero-concentration wells.
+If the control was also run at *C*, the dose's effect on the control is divided
+out too:
+
+```
+fold change = (Sample_C / Sample_0) / (Control_C / Control_0)
+```
+
+It is a plain ratio, not a log. The reference control is, in order:
+
+1. `sample.matched_control`, if set — by `keep_controls_separate=True`, or by hand:
+   `frame["s14"].matched_control = "NC"`;
+2. otherwise the frame's one negative control;
+3. otherwise its one control of unspecified polarity.
+
+A positive control is never used. If more than one sample qualifies,
+`calculate_fold_change` raises and names them rather than picking one.
+
+### Several plates
+
+`SampleFrame([plate1, plate2])` merges wells into samples across plates. By
+default (`pool_controls=False`) each replicate is still compared with
+references from **its own plate**: that plate's blank, the sample's
+zero-concentration wells on that plate, and the control's wells on that plate.
+A plate missing one of them is reported in a warning and the sample skipped,
+rather than borrowing another plate's.
+
+Pass `pool_controls=True` to use the mean over all plates instead.
+
+### Aligning replicates by growth
+
+Replicates on different plates rarely start growing at the same moment.
+`align_replicates_by_od` returns a new frame with each replicate shifted so that
+t = 0 is when its OD first crosses a threshold, all trimmed to a common length:
+
+```python
+from fluoropy.utils import align_replicates_by_od
+
+aligned = align_replicates_by_od(frame, "OD600", od_threshold=0.1)
+aligned.calculate_fold_change("GFP")
+```
+
+The source frame is untouched, and blanks are recognised by role. Each
+replicate's shift is taken from its OD at the lowest concentration
+(`conc_idx_for_shift`) and applied to that replicate at every concentration.
 
 ### Well roles
 
@@ -132,6 +204,7 @@ One file per attribute (samples, media, antibiotics, each inducer).
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — what lives where, and why
 - [CHANGELOG.md](CHANGELOG.md) — including known issues and migration notes
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup and the checks CI runs
 - Docstrings carry the detail; `help(SampleFrame.calculate_fold_change)` works.
 
 ## License

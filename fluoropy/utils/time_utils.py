@@ -84,7 +84,10 @@ def align_replicates_by_od(
     conc_idx_for_shift : int, default -1
         Concentration column to use when detecting the OD crossing.
         -1 = last column in the time_series array, which is the lowest
-        concentration (columns are sorted descending).
+        concentration (columns are sorted descending). Replicate r's shift is
+        taken from this column and applied to replicate r at every
+        concentration, so a dose that delays growth is aligned to the
+        reference column's curve, not its own.
     error_type : str, default 'std'
         Passed through to ``calculate_data_source_statistics()``.
     blanks : list of str, optional
@@ -101,7 +104,10 @@ def align_replicates_by_od(
     Returns
     -------
     SampleFrame
-        New frame with aligned, rectangular time series.
+        New frame with aligned, rectangular time series. Its samples are built
+        from shifted *copies* of the source wells, so the wells and the arrays
+        agree, and methods that re-read wells (blank subtraction, fold change)
+        work on the aligned data. Excluded wells are not carried over.
     tuple[SampleFrame, dict[str, float]]
         Returned when ``return_alignment_stats`` is True. The stats keys are
         ``trimmed_duration``, ``average_start_time``, ``start_time_std``,

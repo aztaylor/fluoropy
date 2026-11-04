@@ -248,4 +248,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-None outstanding. The suite carries no `xfail` markers.
+Found in review; not yet fixed.
+
+- **`match_inducers=True` matches blanks on the first well's inducer dose.** A
+  sample takes its inducers from its first well, so when the dose series is an
+  inducer, a sample whose first well carries a non-zero dose finds no blank.
+  Pass `match_inducers=False` to `calculate_blank_subtracted_timeseries()`.
+  `calculate_fold_change()` is unaffected — it matches blanks without inducers
+  — but it re-runs blank subtraction with the default internally, so it may
+  log a spurious "No blank found" warning.
+- **`Plate.load_layout_csv(..., 'antibiotics')` stores a string** in
+  `well.antibiotics`, which is a dict everywhere else.
+- **Empty cells in a layout CSV likely become the sample type `'nan'`**,
+  creating a sample of empty wells. Unconfirmed against a real layout.
+- **`import_results()` may drop the last read.** It sizes the time axis as
+  `int(run_time / sampling_rate)`, which truncates and does not count the
+  reading at t = 0. Unconfirmed against a real export.
+- **`SampleFrame.summary()`** prints a literal `\n` instead of line breaks, and
+  always reports one concentration.
+- **SEM in `calculate_data_source_statistics()`** divides by the padded
+  replicate count rather than the number of valid replicates, so it is too
+  small when replicate counts are uneven.
+- **Rows past Z** still break `Plate.to_dataframe()` and `plate[("AA", 1)]`,
+  which parse well IDs by hand.
+- **`Plate.get_plate_matrix("fluorescence")`** reads an attribute that no
+  longer exists and always returns NaN.
+- **The `print_*` methods print nothing** unless logging is configured, since
+  the move to logging.
+- **Five test files can't fail**: they print results instead of asserting
+  them.
+
+The suite carries no `xfail` markers.

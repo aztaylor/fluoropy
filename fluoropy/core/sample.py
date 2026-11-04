@@ -158,7 +158,9 @@ class Sample:
         """
         self.name = name
         self.wells = wells or []
-        self.plate_id = None  # Plate identifier if needed
+        # The *first* well's plate. A sample merged across plates has
+        # several; use plate_ids for all of them.
+        self.plate_id = None
 
         # Core data structures - raw individual replicate data
         self.time_series: Dict[str, np.ndarray] = (
@@ -214,7 +216,7 @@ class Sample:
         # from it, matching Well.
         self._role: str = ROLE_SAMPLE
         self.matched_control: Optional[str] = (
-            None  # ID of matched control Sample (when keep_controls_separate=True)
+            None  # Fold-change reference: set by keep_controls_separate, or by hand
         )
         # Which well fills each (replicate, concentration) slot of
         # time_series, per measurement: replicate_wells[m][c][r]. Lets a

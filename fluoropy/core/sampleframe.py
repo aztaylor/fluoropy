@@ -142,7 +142,9 @@ class SampleFrame:
             If True, control samples are kept per-plate and renamed with a
             numeric suffix (e.g. "NC_1", "NC_2"). Each experimental sample
             gains a ``matched_control`` attribute with the ID of the control
-            from the same plate.
+            from the same plate(s): a negative control if there is one,
+            otherwise a control of unspecified polarity, never a positive
+            control. ``calculate_fold_change`` uses it as the reference.
         """
         # Ensure plates is a list
         if not isinstance(plates, list):
@@ -546,19 +548,30 @@ class SampleFrame:
         Calculate blank-subtracted time series data for individual samples.
 
         For each sample, subtracts the blank matching the same experimental
-        condition (media, antibiotics, optionally plate_id, and optionally inducers).
-        Stores result in sample.blanked_data attribute.
+        condition (medium, antibiotics, other modifications and, optionally,
+        inducers). Stores the result in ``sample.blanked_data``.
+
+        Each replicate is blanked against the blank's wells on **its own
+        plate**, so a sample spanning several plates gets each plate's
+        background. A blank laid out at several concentrations is matched by
+        concentration as well. A sample with a replicate on a plate that has
+        no matching blank is skipped with a warning rather than blanked
+        against another plate.
 
         Parameters
         ----------
         measurement_types : List[str], optional
             Measurement types to process. If None, processes all available.
         pool_controls : bool, default False
-            If False, blanks must be on same plate (per-plate matching)
-            If True, pool blanks across all plates (ignore plate_id)
+            If False, each replicate uses the blank wells on its own plate.
+            If True, every replicate uses the mean over all plates' blank wells.
         match_inducers : bool, default True
             If True, blanks must also match on inducer concentrations.
-            If False, only media, antibiotics, [plate_id], and modifications are used.
+            If False, only medium, antibiotics and modifications are used.
+
+            Pass False when the dose series is an inducer. A sample's inducers
+            are taken from its first well, so with True a sample whose first
+            well carries a non-zero dose finds no blank.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
@@ -659,7 +672,9 @@ class SampleFrame:
         """
         Calculate normalized time series data using the form: read1 / (alpha + read2).
 
-        Stores result in sample.normalized_timeseries attribute.
+        Stores the result in ``sample.normalized_data`` (and, for samples that
+        had blank-subtracted data, also as ``sample.normalized_timeseries``).
+        Uses ``blanked_data`` where it exists, otherwise the raw time series.
 
         Parameters
         ----------
@@ -670,9 +685,8 @@ class SampleFrame:
         measurement_types : List[str], optional
             Measurement types to normalize. If None, processes all available.
         pool_controls : bool, default False
-            If False, blanks must be on same plate (per-plate matching)
-            If True, pool blanks across all plates (ignore plate_id)
-            Only used if blanked data needs to be recalculated.
+            Unused; accepted for compatibility. Blank pooling is chosen in
+            :meth:`calculate_blank_subtracted_timeseries`.
         """
         if measurement_types is None:
             measurement_types = self._detect_measurement_types()
@@ -778,8 +792,27 @@ class SampleFrame:
         alpha : float, default 0.01
             Normalization offset
         pool_controls : bool, default False
-            If False, use controls only from same plate (per-plate matching)
-            If True, pool controls across all plates
+            If False, each replicate is compared with references from its own
+            plate: that plate's blank, the sample's zero-concentration wells
+            on it, and the control's wells on it. If True, each reference is
+            the mean over all plates.
+
+        The reference control is ``sample.matched_control`` when set, otherwise
+        the frame's one negative control, otherwise its one control of
+        unspecified polarity; with per-plate matching it must have wells on
+        every plate the sample does. A positive control is never used.
+
+        Raises
+        ------
+        ValueError
+            If several controls qualify as the reference -- choose one with
+            ``frame[sample_id].matched_control = '<control id>'`` -- or if a
+            sample or its control has no zero-concentration wells.
+        KeyError
+            If ``matched_control`` names a sample not in this frame.
+
+        Samples with no qualifying control, or with a replicate on a plate
+        that lacks a needed reference, are skipped with a warning.
         """
 
         # First ensure we have blank-subtracted and normalized data
