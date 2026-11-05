@@ -8,7 +8,7 @@ Requires matplotlib (optional dependency, install with: pip install fluoropy[viz
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -18,12 +18,12 @@ from .well import well_id as make_well_id
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    import matplotlib.pyplot as plt
     import matplotlib.figure
 
 
-def _fold_change_dose_response(frame, sample, measurement, timepoint_idx,
-                               concentration_idx_range=None):
+def _fold_change_dose_response(
+    frame, sample, measurement, timepoint_idx, concentration_idx_range=None
+):
     """
     Ascending-concentration dose-response slice for one sample.
 
@@ -51,7 +51,9 @@ def _fold_change_dose_response(frame, sample, measurement, timepoint_idx,
         start_idx, end_idx = concentration_idx_range
         sl = slice(start_idx, end_idx + 1)
         concentrations, fold_changes, errors = (
-            concentrations[sl], fold_changes[sl], errors[sl]
+            concentrations[sl],
+            fold_changes[sl],
+            errors[sl],
         )
 
     return concentrations, fold_changes, errors
@@ -61,6 +63,7 @@ def _require_matplotlib():
     """Import and return matplotlib.pyplot, raising a clear error if unavailable."""
     try:
         import matplotlib.pyplot as plt
+
         return plt
     except ImportError:
         raise ImportError(
@@ -73,9 +76,14 @@ def _require_matplotlib():
 # Plate plotting functions
 # ==========================================================================
 
-def plot_timeseries_grid(plate, measurement_type: str, figsize: tuple = (15, 10),
-                         title: Optional[str] = None,
-                         show_sample_info: bool = True) -> 'matplotlib.figure.Figure':
+
+def plot_timeseries_grid(
+    plate,
+    measurement_type: str,
+    figsize: tuple = (15, 10),
+    title: Optional[str] = None,
+    show_sample_info: bool = True,
+) -> "matplotlib.figure.Figure":
     """
     Plot raw timeseries data for each well in an 8x12 grid matching plate layout.
 
@@ -100,8 +108,11 @@ def plot_timeseries_grid(plate, measurement_type: str, figsize: tuple = (15, 10)
     plt = _require_matplotlib()
 
     fig, axes = plt.subplots(8, 12, figsize=figsize, sharex=True, sharey=True)
-    fig.suptitle(title or f"{measurement_type} Timeseries - {plate.name or 'Plate'}",
-                fontsize=14, fontweight='bold')
+    fig.suptitle(
+        title or f"{measurement_type} Timeseries - {plate.name or 'Plate'}",
+        fontsize=14,
+        fontweight="bold",
+    )
 
     for row in range(8):
         for col in range(12):
@@ -109,37 +120,56 @@ def plot_timeseries_grid(plate, measurement_type: str, figsize: tuple = (15, 10)
             well_id = make_well_id(row, col)
             well = plate.wells.get(well_id)
 
-            if well and hasattr(well, 'time_series') and measurement_type in well.time_series:
+            if (
+                well
+                and hasattr(well, "time_series")
+                and measurement_type in well.time_series
+            ):
                 y_data = well.time_series[measurement_type]
-                x_data = well.time_points if hasattr(well, 'time_points') and well.time_points is not None else range(len(y_data))
+                x_data = (
+                    well.time_points
+                    if hasattr(well, "time_points") and well.time_points is not None
+                    else range(len(y_data))
+                )
 
-                ax.plot(x_data, y_data, 'b-', linewidth=1.5, alpha=0.8)
+                ax.plot(x_data, y_data, "b-", linewidth=1.5, alpha=0.8)
 
-                if hasattr(well, 'is_blank') and well.is_blank:
-                    ax.set_facecolor('#f0f0f0')
-                elif hasattr(well, 'is_control') and well.is_control:
-                    ax.set_facecolor('#fff5f5')
+                if hasattr(well, "is_blank") and well.is_blank:
+                    ax.set_facecolor("#f0f0f0")
+                elif hasattr(well, "is_control") and well.is_control:
+                    ax.set_facecolor("#fff5f5")
                 else:
-                    ax.set_facecolor('white')
+                    ax.set_facecolor("white")
 
-                if show_sample_info and hasattr(well, 'sample_type'):
+                if show_sample_info and hasattr(well, "sample_type"):
                     sample_info = well.sample_type or "Unknown"
-                    if hasattr(well, 'concentration') and well.concentration is not None:
+                    if (
+                        hasattr(well, "concentration")
+                        and well.concentration is not None
+                    ):
                         sample_info += f"\n{well.concentration}"
                     ax.set_title(f"{well_id}\n{sample_info}", fontsize=8, pad=2)
                 else:
                     ax.set_title(well_id, fontsize=8, pad=2)
             else:
-                ax.set_facecolor('#e0e0e0')
+                ax.set_facecolor("#e0e0e0")
                 ax.set_title(well_id, fontsize=8, pad=2)
-                ax.text(0.5, 0.5, 'No Data', ha='center', va='center',
-                       transform=ax.transAxes, fontsize=8, alpha=0.6)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No Data",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    fontsize=8,
+                    alpha=0.6,
+                )
 
             ax.tick_params(labelsize=6)
             ax.grid(True, alpha=0.3)
 
-    fig.text(0.5, 0.02, 'Time', ha='center', fontsize=12)
-    fig.text(0.02, 0.5, measurement_type, va='center', rotation='vertical', fontsize=12)
+    fig.text(0.5, 0.02, "Time", ha="center", fontsize=12)
+    fig.text(0.02, 0.5, measurement_type, va="center", rotation="vertical", fontsize=12)
 
     plt.tight_layout()
     plt.subplots_adjust(top=0.93, bottom=0.07, left=0.05, right=0.98)
@@ -147,13 +177,17 @@ def plot_timeseries_grid(plate, measurement_type: str, figsize: tuple = (15, 10)
     return fig
 
 
-def plot_zscore_heatmap(plate, measurement_type: str, timepoint_idx: int,
-                        exclude_blanks: bool = True,
-                        exclude_controls: bool = False,
-                        figsize: tuple = (10, 6),
-                        title: Optional[str] = None,
-                        vmin: float = -3,
-                        vmax: float = 3) -> 'matplotlib.figure.Figure':
+def plot_zscore_heatmap(
+    plate,
+    measurement_type: str,
+    timepoint_idx: int,
+    exclude_blanks: bool = True,
+    exclude_controls: bool = False,
+    figsize: tuple = (10, 6),
+    title: Optional[str] = None,
+    vmin: float = -3,
+    vmax: float = 3,
+) -> "matplotlib.figure.Figure":
     """
     Plot a heatmap of z-scores across the plate.
 
@@ -191,30 +225,37 @@ def plot_zscore_heatmap(plate, measurement_type: str, timepoint_idx: int,
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    im = ax.imshow(z_matrix, cmap='RdBu_r', vmin=vmin, vmax=vmax, aspect='auto')
+    im = ax.imshow(z_matrix, cmap="RdBu_r", vmin=vmin, vmax=vmax, aspect="auto")
 
     cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Z-score', rotation=270, labelpad=20)
+    cbar.set_label("Z-score", rotation=270, labelpad=20)
 
-    ax.set_xlabel('Column')
-    ax.set_ylabel('Row')
+    ax.set_xlabel("Column")
+    ax.set_ylabel("Row")
 
     ax.set_xticks(range(plate.cols))
-    ax.set_xticklabels([str(i+1) for i in range(plate.cols)])
+    ax.set_xticklabels([str(i + 1) for i in range(plate.cols)])
     ax.set_yticks(range(plate.rows))
     ax.set_yticklabels([row_label(i) for i in range(plate.rows)])
 
     if title is None:
-        title = f'Z-score Heatmap: {measurement_type} (Timepoint {timepoint_idx})'
+        title = f"Z-score Heatmap: {measurement_type} (Timepoint {timepoint_idx})"
     ax.set_title(title)
 
     for i in range(plate.rows):
         for j in range(plate.cols):
             z_val = z_matrix[i, j]
             if not np.isnan(z_val) and abs(z_val) > 2:
-                ax.text(j, i, f'{z_val:.1f}', ha='center', va='center',
-                       color='white' if abs(z_val) > 2.5 else 'black',
-                       fontweight='bold', fontsize=8)
+                ax.text(
+                    j,
+                    i,
+                    f"{z_val:.1f}",
+                    ha="center",
+                    va="center",
+                    color="white" if abs(z_val) > 2.5 else "black",
+                    fontweight="bold",
+                    fontsize=8,
+                )
 
     plt.tight_layout()
     return fig
@@ -224,16 +265,20 @@ def plot_zscore_heatmap(plate, measurement_type: str, timepoint_idx: int,
 # SampleFrame plotting functions
 # ==========================================================================
 
-def plot_fold_change_dose_response(frame, timepoint_idx: int,
-                                   sample_ids: Optional[List[str]] = None,
-                                   x_logscale: bool = True,
-                                   y_logscale: bool = True,
-                                   figsize: Optional[Tuple[int, int]] = None,
-                                   title: Optional[str] = None,
-                                   ylabel: str = "Fold Change",
-                                   xlabel: str = "Concentration",
-                                   concentration_idx_range: Optional[Tuple[int, int]] = None,
-                                   measurement: Optional[str] = None):
+
+def plot_fold_change_dose_response(
+    frame,
+    timepoint_idx: int,
+    sample_ids: Optional[List[str]] = None,
+    x_logscale: bool = True,
+    y_logscale: bool = True,
+    figsize: Optional[Tuple[int, int]] = None,
+    title: Optional[str] = None,
+    ylabel: str = "Fold Change",
+    xlabel: str = "Concentration",
+    concentration_idx_range: Optional[Tuple[int, int]] = None,
+    measurement: Optional[str] = None,
+):
     """
     Plot dose-response curve: fold change vs concentration at a specific timepoint.
 
@@ -286,7 +331,7 @@ def plot_fold_change_dose_response(frame, timepoint_idx: int,
 
     if title is None:
         title = f"Dose-Response Curve at Timepoint {timepoint_idx}"
-    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_title(title, fontsize=14, fontweight="bold")
 
     colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
 
@@ -300,34 +345,46 @@ def plot_fold_change_dose_response(frame, timepoint_idx: int,
             logger.warning(f"No fold change data to plot for {sample_id}")
             continue
 
-        ax.errorbar(concentrations, fold_changes, yerr=errors,
-                   marker='o', linestyle='-', linewidth=2, markersize=8,
-                   capsize=5, capthick=2, label=sample_id, color=colors[color_idx])
+        ax.errorbar(
+            concentrations,
+            fold_changes,
+            yerr=errors,
+            marker="o",
+            linestyle="-",
+            linewidth=2,
+            markersize=8,
+            capsize=5,
+            capthick=2,
+            label=sample_id,
+            color=colors[color_idx],
+        )
 
     if x_logscale:
-        ax.set_xscale('log')
+        ax.set_xscale("log")
     if y_logscale:
-        ax.set_yscale('log')
+        ax.set_yscale("log")
 
     ax.set_ylabel(ylabel, fontsize=12)
     ax.set_xlabel(xlabel, fontsize=12)
-    ax.grid(True, alpha=0.3, linestyle='--')
-    ax.legend(loc='best', fontsize=11)
+    ax.grid(True, alpha=0.3, linestyle="--")
+    ax.legend(loc="best", fontsize=11)
 
     plt.tight_layout()
     return fig, ax
 
 
-def plot_replicate_time_series(frame,
-                               measurement: str,
-                               sample_ids: Optional[List[str]] = None,
-                               show_mean: bool = True,
-                               figsize: Optional[Tuple[int, int]] = None,
-                               title: Optional[str] = None,
-                               ylabel: Optional[str] = None,
-                               xlabel: str = "Time (hours)",
-                               sharey: bool = True,
-                               max_cols: int = 4) -> Tuple['matplotlib.figure.Figure', Dict[str, 'matplotlib.axes.Axes']]:
+def plot_replicate_time_series(
+    frame,
+    measurement: str,
+    sample_ids: Optional[List[str]] = None,
+    show_mean: bool = True,
+    figsize: Optional[Tuple[int, int]] = None,
+    title: Optional[str] = None,
+    ylabel: Optional[str] = None,
+    xlabel: str = "Time (hours)",
+    sharey: bool = True,
+    max_cols: int = 4,
+) -> Tuple["matplotlib.figure.Figure", Dict[str, "matplotlib.axes.Axes"]]:
     """
     Plot time series curves for replicates of samples at each concentration.
 
@@ -392,7 +449,10 @@ def plot_replicate_time_series(frame,
         for sample_id in sample_ids:
             for well in frame.samples[sample_id].wells:
                 available_measurements.update(well.time_series.keys())
-        raise ValueError(f"Measurement '{measurement}' not found in wells. Available: {list(available_measurements) if available_measurements else 'none'}")
+        raise ValueError(
+            f"Measurement '{measurement}' not found in wells. "
+            f"Available: {sorted(available_measurements) or 'none'}"
+        )
 
     if wells_with_data == 0:
         raise RuntimeError("No wells with valid time_points data found")
@@ -440,12 +500,14 @@ def plot_replicate_time_series(frame,
         n_cols = max(max_cols, min(n_cols, 8))
         n_rows = int(np.ceil(n_subplots / n_cols))
 
-    fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize, squeeze=False, sharey=sharey)
+    fig, axes_array = plt.subplots(
+        n_rows, n_cols, figsize=figsize, squeeze=False, sharey=sharey
+    )
     axes_flat = axes_array.flatten()
 
     if title is None:
         title = f"Replicate Time Series - {measurement}"
-    fig.suptitle(title, fontsize=16, fontweight='bold', y=0.995)
+    fig.suptitle(title, fontsize=16, fontweight="bold", y=0.995)
 
     axes_dict = {}
 
@@ -465,27 +527,46 @@ def plot_replicate_time_series(frame,
                     replicate_data = replicate_data[:n]
                 else:
                     time = np.arange(len(replicate_data))
-                label = getattr(well, 'plate_id', well.well_id)
-                ax.plot(time, replicate_data, '-', alpha=0.6,
-                       linewidth=1.5, label=label, zorder=2)
+                label = getattr(well, "plate_id", well.well_id)
+                ax.plot(
+                    time,
+                    replicate_data,
+                    "-",
+                    alpha=0.6,
+                    linewidth=1.5,
+                    label=label,
+                    zorder=2,
+                )
 
         if show_mean:
-            replicate_arrays = np.column_stack([w.time_series[measurement] for w in wells])
+            replicate_arrays = np.column_stack(
+                [w.time_series[measurement] for w in wells]
+            )
             mean_data = np.mean(replicate_arrays, axis=1)
             error_data = np.std(replicate_arrays, axis=1)
-            ax.plot(time, mean_data, 'o-', linewidth=2.5,
-                   markersize=6, label=f"{sample_id} mean", zorder=3)
+            ax.plot(
+                time,
+                mean_data,
+                "o-",
+                linewidth=2.5,
+                markersize=6,
+                label=f"{sample_id} mean",
+                zorder=3,
+            )
 
-            ax.fill_between(time,
-                           mean_data - error_data,
-                           mean_data + error_data,
-                           alpha=0.15, zorder=1)
+            ax.fill_between(
+                time,
+                mean_data - error_data,
+                mean_data + error_data,
+                alpha=0.15,
+                zorder=1,
+            )
 
         ax.set_xlabel(xlabel, fontsize=10)
         ax.set_ylabel(ylabel if ylabel else measurement, fontsize=10)
-        ax.set_title(f"{sample_id} [{conc}]", fontsize=11, fontweight='bold')
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.legend(loc='best', fontsize=8, title="Replicates", title_fontsize=9)
+        ax.set_title(f"{sample_id} [{conc}]", fontsize=11, fontweight="bold")
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.legend(loc="best", fontsize=8, title="Replicates", title_fontsize=9)
 
         subplot_key = f"({sample_id}, {conc})"
         axes_dict[subplot_key] = ax
@@ -497,17 +578,20 @@ def plot_replicate_time_series(frame,
     return fig, axes_dict
 
 
-def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
-                                     sample_ids: Optional[List[str]] = None,
-                                     x_logscale: bool = True,
-                                     y_logscale: bool = True,
-                                     figsize: Optional[Tuple[int, int]] = None,
-                                     title: Optional[str] = None,
-                                     ylabel: str = "Fold Change",
-                                     xlabel: str = "Concentration",
-                                     concentration_idx_range: Optional[Tuple[int, int]] = None,
-                                     num_points: int = 100,
-                                     measurement: Optional[str] = None):
+def plot_dose_response_with_hill_fit(
+    frame,
+    timepoint_idx: int,
+    sample_ids: Optional[List[str]] = None,
+    x_logscale: bool = True,
+    y_logscale: bool = True,
+    figsize: Optional[Tuple[int, int]] = None,
+    title: Optional[str] = None,
+    ylabel: str = "Fold Change",
+    xlabel: str = "Concentration",
+    concentration_idx_range: Optional[Tuple[int, int]] = None,
+    num_points: int = 100,
+    measurement: Optional[str] = None,
+):
     """
     Plot dose-response curve with Hill function fit overlay.
 
@@ -546,7 +630,9 @@ def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
     """
     plt = _require_matplotlib()
 
-    fit_results = frame.calculate_hill_fits(timepoint_idx, sample_ids, concentration_idx_range)
+    fit_results = frame.calculate_hill_fits(
+        timepoint_idx, sample_ids, concentration_idx_range
+    )
 
     if not sample_ids:
         sample_ids = frame.get_test_samples()
@@ -560,10 +646,10 @@ def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
 
     if title is None:
         title = f"Dose-Response Curve (Hill Fit) at Timepoint {timepoint_idx}"
-    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_title(title, fontsize=14, fontweight="bold")
 
     def hill_function(conc, ec50, hill, min_val, max_val):
-        return min_val + (max_val - min_val) * (conc ** hill) / (ec50 ** hill + conc ** hill)
+        return min_val + (max_val - min_val) * (conc**hill) / (ec50**hill + conc**hill)
 
     colors = plt.cm.Set1(np.linspace(0, 1, len(sample_ids)))
 
@@ -577,56 +663,77 @@ def plot_dose_response_with_hill_fit(frame, timepoint_idx: int,
             logger.warning(f"No fold change data to plot for {sample_id}")
             continue
 
-        ax.errorbar(concentrations, fold_changes, yerr=errors,
-                   marker='o', linestyle='', linewidth=2, markersize=8,
-                   capsize=5, capthick=2, label=sample_id, color=colors[color_idx],
-                   alpha=0.7)
+        ax.errorbar(
+            concentrations,
+            fold_changes,
+            yerr=errors,
+            marker="o",
+            linestyle="",
+            linewidth=2,
+            markersize=8,
+            capsize=5,
+            capthick=2,
+            label=sample_id,
+            color=colors[color_idx],
+            alpha=0.7,
+        )
 
         if sample_id in fit_results:
             params = fit_results[sample_id]
-            ec50 = params['ec50']
-            hill = params['hill']
-            min_val = params['min']
-            max_val = params['max']
-            r_sq = params['r_squared']
+            ec50 = params["ec50"]
+            hill = params["hill"]
+            min_val = params["min"]
+            max_val = params["max"]
+            r_sq = params["r_squared"]
 
             conc_min, conc_max = np.min(concentrations), np.max(concentrations)
             if x_logscale:
-                conc_smooth = np.logspace(np.log10(conc_min), np.log10(conc_max), num_points)
+                conc_smooth = np.logspace(
+                    np.log10(conc_min), np.log10(conc_max), num_points
+                )
             else:
                 conc_smooth = np.linspace(conc_min, conc_max, num_points)
 
             fc_smooth = hill_function(conc_smooth, ec50, hill, min_val, max_val)
 
-            ax.plot(conc_smooth, fc_smooth, '-', linewidth=2.5,
-                   color=colors[color_idx], alpha=0.9,
-                   label=f"{sample_id} fit (EC50={ec50:.2e}, n={hill:.2f}, R²={r_sq:.3f})")
+            ax.plot(
+                conc_smooth,
+                fc_smooth,
+                "-",
+                linewidth=2.5,
+                color=colors[color_idx],
+                alpha=0.9,
+                label=f"{sample_id} fit (EC50={ec50:.2e}, n={hill:.2f}, R²={r_sq:.3f})",
+            )
 
     if x_logscale:
-        ax.set_xscale('log')
+        ax.set_xscale("log")
     if y_logscale:
-        ax.set_yscale('log')
+        ax.set_yscale("log")
 
     ax.set_ylabel(ylabel, fontsize=12)
     ax.set_xlabel(xlabel, fontsize=12)
-    ax.grid(True, alpha=0.3, linestyle='--')
-    ax.legend(loc='best', fontsize=10)
+    ax.grid(True, alpha=0.3, linestyle="--")
+    ax.legend(loc="best", fontsize=10)
 
     plt.tight_layout()
     return fig, ax
 
 
-def plot_mean_normalized_data(frame, measurement: str,
-                              sample_ids: Optional[List[str]] = None,
-                              figsize: Optional[Tuple[int, int]] = None,
-                              title: Optional[str] = None,
-                              legend_title: str = "Concentration",
-                              ylabel: Optional[str] = None,
-                              xlabel: str = "Time (hours)",
-                              show_error: bool = True,
-                              error_type: str = 'std',
-                              error_alpha: float = 0.1,
-                              concentration_idx_range: Optional[Tuple[int, int]] = None):
+def plot_mean_normalized_data(
+    frame,
+    measurement: str,
+    sample_ids: Optional[List[str]] = None,
+    figsize: Optional[Tuple[int, int]] = None,
+    title: Optional[str] = None,
+    legend_title: str = "Concentration",
+    ylabel: Optional[str] = None,
+    xlabel: str = "Time (hours)",
+    show_error: bool = True,
+    error_type: str = "std",
+    error_alpha: float = 0.1,
+    concentration_idx_range: Optional[Tuple[int, int]] = None,
+):
     """
     Plot OD normalized fluorescence time series for each sample as subplots.
 
@@ -665,8 +772,9 @@ def plot_mean_normalized_data(frame, measurement: str,
     plt = _require_matplotlib()
 
     if not sample_ids:
-        sample_ids = [sid for sid in frame.samples.keys()
-                     if not frame.samples[sid].is_blank]
+        sample_ids = [
+            sid for sid in frame.samples.keys() if not frame.samples[sid].is_blank
+        ]
 
     if not sample_ids:
         raise ValueError("No samples found (excluding blanks)")
@@ -678,14 +786,16 @@ def plot_mean_normalized_data(frame, measurement: str,
     has_normalized_data = False
     for sample_id in sample_ids:
         sample = frame.samples[sample_id]
-        if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
+        if hasattr(sample, "normalized_data_mean") and sample.normalized_data_mean:
             if measurement in sample.normalized_data_mean:
                 has_normalized_data = True
                 break
 
     if not has_normalized_data:
-        raise RuntimeError(f"No normalized timeseries data found for measurement '{measurement}'. "
-                         f"Call calculate_normalized_timeseries() first.")
+        raise RuntimeError(
+            f"No normalized timeseries data found for measurement '{measurement}'. "
+            f"Call calculate_normalized_timeseries() first."
+        )
 
     n_samples = len(sample_ids)
     if figsize is None:
@@ -698,13 +808,14 @@ def plot_mean_normalized_data(frame, measurement: str,
         n_cols = max(1, min(n_cols, 5))
         n_rows = int(np.ceil(n_samples / n_cols))
 
-    fig, axes_array = plt.subplots(n_rows, n_cols, figsize=figsize,
-                                   squeeze=False, sharey=True)
+    fig, axes_array = plt.subplots(
+        n_rows, n_cols, figsize=figsize, squeeze=False, sharey=True
+    )
     axes_flat = axes_array.flatten()
 
     if title is None:
         title = f"OD Normalized {measurement} Time Series"
-    fig.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
+    fig.suptitle(title, fontsize=14, fontweight="bold", y=0.995)
 
     axes_dict = {}
 
@@ -714,32 +825,61 @@ def plot_mean_normalized_data(frame, measurement: str,
         ax = axes_flat[subplot_idx]
         sample = frame.samples[sample_id]
 
-        if not hasattr(sample, 'normalized_data_mean') or not sample.normalized_data_mean:
-            ax.text(0.5, 0.5, f"No data for {sample_id}",
-                   ha='center', va='center', transform=ax.transAxes)
+        if (
+            not hasattr(sample, "normalized_data_mean")
+            or not sample.normalized_data_mean
+        ):
+            ax.text(
+                0.5,
+                0.5,
+                f"No data for {sample_id}",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
             ax.set_visible(True)
             axes_dict[sample_id] = ax
             continue
 
         if measurement not in sample.normalized_data_mean:
-            ax.text(0.5, 0.5, f"Measurement {measurement}\nnot found",
-                   ha='center', va='center', transform=ax.transAxes)
+            ax.text(
+                0.5,
+                0.5,
+                f"Measurement {measurement}\nnot found",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
             ax.set_visible(True)
             axes_dict[sample_id] = ax
             continue
 
-        if hasattr(sample, 'normalized_data_mean') and sample.normalized_data_mean:
-            logger.info(f"Normalized statistics found for {sample_id} with shape {sample.normalized_data_mean.get(measurement).shape if sample.normalized_data_mean.get(measurement) is not None else 'N/A'}")
+        if hasattr(sample, "normalized_data_mean") and sample.normalized_data_mean:
+            found = sample.normalized_data_mean.get(measurement)
+            logger.info(
+                f"Normalized statistics found for {sample_id} with shape "
+                f"{found.shape if found is not None else 'N/A'}"
+            )
             mean_data = sample.normalized_data_mean.get(measurement)
-            error_data = sample.normalized_data_error.get(measurement) if show_error else None
+            error_data = (
+                sample.normalized_data_error.get(measurement) if show_error else None
+            )
         else:
-            logger.warning(f"No statistics found for {sample_id}, using raw normalized data")
+            logger.warning(
+                f"No statistics found for {sample_id}, using raw normalized data"
+            )
             mean_data = sample.normalized_timeseries[measurement]
             error_data = None
 
         if mean_data is None or mean_data.size == 0:
-            ax.text(0.5, 0.5, f"No normalized data\nfor {sample_id}",
-                   ha='center', va='center', transform=ax.transAxes)
+            ax.text(
+                0.5,
+                0.5,
+                f"No normalized data\nfor {sample_id}",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
             ax.set_visible(True)
             axes_dict[sample_id] = ax
             continue
@@ -752,7 +892,7 @@ def plot_mean_normalized_data(frame, measurement: str,
 
         if concentration_idx_range is not None:
             start_idx, end_idx = concentration_idx_range
-            conc_indices = np.arange(len(concentrations))[start_idx:end_idx+1]
+            conc_indices = np.arange(len(concentrations))[start_idx : end_idx + 1]
             concentrations = concentrations[conc_indices]
         else:
             conc_indices = np.arange(len(concentrations))
@@ -767,34 +907,36 @@ def plot_mean_normalized_data(frame, measurement: str,
                 conc_mean = mean_data
                 conc_error = error_data if error_data is not None else None
 
-            ax.scatter(time,
-                       conc_mean,
-                       s=1,
-                       color=color,
-                       label=f"[{conc}]",
-                       zorder=3)
+            ax.scatter(time, conc_mean, s=1, color=color, label=f"[{conc}]", zorder=3)
 
             if show_error and conc_error is not None:
-                ax.fill_between(time,
-                               conc_mean - conc_error,
-                               conc_mean + conc_error,
-                               alpha=error_alpha, color=color, zorder=1)
+                ax.fill_between(
+                    time,
+                    conc_mean - conc_error,
+                    conc_mean + conc_error,
+                    alpha=error_alpha,
+                    color=color,
+                    zorder=1,
+                )
 
         ax.set_xlabel(xlabel, fontsize=10)
         if ylabel is None:
             ax.set_ylabel(f"OD Normalized {measurement}", fontsize=10)
         else:
             ax.set_ylabel(ylabel, fontsize=10)
-        ax.set_title(sample_id, fontsize=11, fontweight='bold')
-        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.set_title(sample_id, fontsize=11, fontweight="bold")
+        ax.grid(True, alpha=0.3, linestyle="--")
         if len(concentrations) > 0:
             handles, labels = ax.get_legend_handles_labels()
-            fig.legend(handles, labels,
-                      loc='center',
-                      bbox_to_anchor=(1.15, 0.5),
-                      fontsize=9,
-                      title=legend_title,
-                      title_fontsize=10)
+            fig.legend(
+                handles,
+                labels,
+                loc="center",
+                bbox_to_anchor=(1.15, 0.5),
+                fontsize=9,
+                title=legend_title,
+                title_fontsize=10,
+            )
 
         axes_dict[sample_id] = ax
 

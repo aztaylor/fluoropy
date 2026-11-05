@@ -6,14 +6,47 @@ with statistical analysis delegated to Sample and SampleFrame classes.
 """
 
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Any, Dict, List, Optional, Union
+
 import numpy as np
 import pandas as pd
-from .well import Well, parse_well_id
-from .well import well_id as make_well_id
+
+from ..utils.helpers import parse_plate_format
 from ..utils.import_data import import_results
+from .well import PLATE_DIMENSIONS, Well, row_index
+from .well import well_id as make_well_id
 
 logger = logging.getLogger(__name__)
+
+# Cell text that means "nothing here" in a layout CSV.
+_EMPTY_CELLS = frozenset({"", "nan", "none", "-", "\u2013", "\u2014"})
+
+# load_layout_csv(category=...) -> the Well attribute it fills.
+_LAYOUT_CATEGORIES = {
+    "inducer": "inducers",
+    "antibiotic": "antibiotics",
+    "modification": "other_modifications",
+}
+
+
+def _cell_label(value) -> Optional[str]:
+    """A layout cell as a sample name, or None for an empty cell."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    text = str(value).strip()
+    return None if text.lower() in _EMPTY_CELLS else text
+
+
+def _cell_amount(value) -> float:
+    """A layout cell as an amount: 0.0 when empty or not a number."""
+    text = _cell_label(value)
+    if text is None:
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        logger.warning(f"Layout cell {text!r} is not a number; using 0.0")
+        return 0.0
 
 
 class Plate:
@@ -41,25 +74,27 @@ class Plate:
     ...     print(f"Well {well_id}: {plate[well_id].sample_type}")
     """
 
-    def __init__(self,
-                 plate_format: str = "96",
-                 name: Optional[str] = None,
-                 data_file: Optional[str] = None,
-                 sample_layout: Optional[str] = None,
-                 concentration_layout: Optional[str] = None,
-                 media_layout: Optional[str] = None,
-                 antibiotic_layouts: Optional[Dict[str, str]] = None,
-                 inducer_layouts: Optional[Dict[str, str]] = None,
-                 other_modification_layouts: Optional[Dict[str, str]] = None,
-                 primary_molecule: Optional[str] = None,
-                 antibiotics_units: Optional[Dict[str, str]] = None,
-                 inducers_units: Optional[Dict[str, str]] = None,
-                 other_modifications_units: Optional[Dict[str, str]] = None,
-                 run_time: Optional[float] = None,
-                 sampling_rate: Optional[float] = None,
-                 read_labels: Optional[List[str]] = None,
-                 controls: Optional[List[str]] = None,
-                 blanks: Optional[List[str]] = None):
+    def __init__(
+        self,
+        plate_format: str = "96",
+        name: Optional[str] = None,
+        data_file: Optional[str] = None,
+        sample_layout: Optional[str] = None,
+        concentration_layout: Optional[str] = None,
+        media_layout: Optional[str] = None,
+        antibiotic_layouts: Optional[Dict[str, str]] = None,
+        inducer_layouts: Optional[Dict[str, str]] = None,
+        other_modification_layouts: Optional[Dict[str, str]] = None,
+        primary_molecule: Optional[str] = None,
+        antibiotics_units: Optional[Dict[str, str]] = None,
+        inducers_units: Optional[Dict[str, str]] = None,
+        other_modifications_units: Optional[Dict[str, str]] = None,
+        run_time: Optional[float] = None,
+        sampling_rate: Optional[float] = None,
+        read_labels: Optional[List[str]] = None,
+        controls: Optional[List[str]] = None,
+        blanks: Optional[List[str]] = None,
+    ):
         """
         Initialize a Plate object.
 
@@ -107,6 +142,8 @@ class Plate:
         controls : List[str], optional
             List of control sample names for automatic classification
         """
+        # Accept 384 as well as "384".
+        plate_format = parse_plate_format(plate_format)
         self.format = plate_format
         self.name = name
         self.plate_id = name  # Alias for backward compatibility
@@ -115,21 +152,9 @@ class Plate:
         self.global_time_points: Optional[np.ndarray] = None
         self.measurements: List[str] = []  # List of available measurement types
 
-        # Set plate dimensions
-        if plate_format == "96":
-            self.rows, self.cols = 8, 12
-            self.columns = 12  # Alias for backward compatibility
-            self.plate_format = "96"  # For consistency
-        elif plate_format == "384":
-            self.rows, self.cols = 16, 24
-            self.columns = 24
-            self.plate_format = "384"
-        elif plate_format == "1536":
-            self.rows, self.cols = 32, 48
-            self.columns = 48
-            self.plate_format = "1536"
-        else:
-            raise ValueError(f"Unsupported plate format: {plate_format}")
+        self.rows, self.cols = PLATE_DIMENSIONS[plate_format]
+        self.columns = self.cols  # Alias for backward compatibility
+        self.plate_format = plate_format  # For consistency
 
         # Initialize all wells for the plate format
         self._initialize_wells()
@@ -152,7 +177,7 @@ class Plate:
                 sampling_rate=sampling_rate,
                 read_labels=read_labels,
                 controls=controls or [],
-                blanks=blanks or []
+                blanks=blanks or [],
             )
 
     def _initialize_wells(self):
@@ -161,23 +186,29 @@ class Plate:
             for col in range(self.cols):
                 well_id = make_well_id(row, col)
                 self.wells[well_id] = Well(well_id, row, col)
-                self.wells[well_id].plate_id = self.plate_id  # Assign plate_id to each well
+                self.wells[well_id].plate_id = (
+                    self.plate_id
+                )  # Assign plate_id to each well
 
-    def _load_data_and_layouts(self, data_file: str, sample_layout: str,
-                              concentration_layout: Optional[str],
-                              media_layout: Optional[str],
-                              antibiotic_layouts: Optional[Dict[str, str]],
-                              inducer_layouts: Optional[Dict[str, str]],
-                              other_modification_layouts: Optional[Dict[str, str]],
-                              primary_molecule: Optional[str],
-                              antibiotics_units: Optional[Dict[str, str]],
-                              inducers_units: Optional[Dict[str, str]],
-                              other_modifications_units: Optional[Dict[str, str]],
-                              run_time: Optional[float],
-                              sampling_rate: Optional[float],
-                              read_labels: Optional[List[str]],
-                              controls: Optional[List[str]],
-                              blanks: Optional[List[str]]):
+    def _load_data_and_layouts(
+        self,
+        data_file: str,
+        sample_layout: str,
+        concentration_layout: Optional[str],
+        media_layout: Optional[str],
+        antibiotic_layouts: Optional[Dict[str, str]],
+        inducer_layouts: Optional[Dict[str, str]],
+        other_modification_layouts: Optional[Dict[str, str]],
+        primary_molecule: Optional[str],
+        antibiotics_units: Optional[Dict[str, str]],
+        inducers_units: Optional[Dict[str, str]],
+        other_modifications_units: Optional[Dict[str, str]],
+        run_time: Optional[float],
+        sampling_rate: Optional[float],
+        read_labels: Optional[List[str]],
+        controls: Optional[List[str]],
+        blanks: Optional[List[str]],
+    ):
         """
         Load data from file and apply layout configurations.
 
@@ -232,7 +263,7 @@ class Plate:
             n_cols=self.cols,
             run_time=run_time,
             sampling_rate=sampling_rate,
-            read_labels=read_labels
+            read_labels=read_labels,
         )
 
         # Store metadata
@@ -254,7 +285,9 @@ class Plate:
         # Load antibiotics
         if antibiotic_layouts:
             for antibiotic_name, layout_path in antibiotic_layouts.items():
-                logger.info(f"Loading antibiotic '{antibiotic_name}' from {layout_path}...")
+                logger.info(
+                    f"Loading antibiotic '{antibiotic_name}' from {layout_path}..."
+                )
                 all_molecule_grids[antibiotic_name] = self._read_grid_csv(layout_path)
 
         # Load other modifications
@@ -269,14 +302,13 @@ class Plate:
 
         # Priority 1: Explicit concentration layout
         if concentration_layout is not None:
-            logger.info(f"Using explicit concentration layout as primary concentration...")
+            logger.info(
+                "Using explicit concentration layout as primary concentration..."
+            )
             conc_grid = self._read_grid_csv(concentration_layout)
             for row in range(min(conc_grid.shape[0], self.rows)):
                 for col in range(min(conc_grid.shape[1], self.cols)):
-                    try:
-                        conc_map[row, col] = float(conc_grid[row, col])
-                    except (ValueError, TypeError):
-                        conc_map[row, col] = 0.0
+                    conc_map[row, col] = _cell_amount(conc_grid[row, col])
 
         # Priority 2: Primary molecule (molecule of interest)
         elif primary_molecule is not None and primary_molecule in all_molecule_grids:
@@ -285,10 +317,7 @@ class Plate:
             primary_mol_used = primary_molecule
             for row in range(min(mol_grid.shape[0], self.rows)):
                 for col in range(min(mol_grid.shape[1], self.cols)):
-                    try:
-                        conc_map[row, col] = float(mol_grid[row, col])
-                    except (ValueError, TypeError):
-                        conc_map[row, col] = 0.0
+                    conc_map[row, col] = _cell_amount(mol_grid[row, col])
 
         # Priority 3: First molecule (fallback, priority: inducers > antibiotics > other)
         elif all_molecule_grids:
@@ -302,15 +331,14 @@ class Plate:
                 first_mol_name = next(iter(other_modification_layouts.keys()))
 
             if first_mol_name:
-                logger.info(f"Using first molecule '{first_mol_name}' as primary concentration...")
+                logger.info(
+                    f"Using first molecule '{first_mol_name}' as primary concentration..."
+                )
                 mol_grid = all_molecule_grids[first_mol_name]
                 primary_mol_used = first_mol_name
                 for row in range(min(mol_grid.shape[0], self.rows)):
                     for col in range(min(mol_grid.shape[1], self.cols)):
-                        try:
-                            conc_map[row, col] = float(mol_grid[row, col])
-                        except (ValueError, TypeError):
-                            conc_map[row, col] = 0.0
+                        conc_map[row, col] = _cell_amount(mol_grid[row, col])
 
         # Priority 4: No concentrations (conc_map already initialized to zeros)
 
@@ -321,7 +349,7 @@ class Plate:
             data_dict=data_dict,
             time_dict=time_dict,
             controls=controls,
-            blanks=blanks
+            blanks=blanks,
         )
 
         # Now populate wells with molecule concentrations and units
@@ -339,9 +367,8 @@ class Plate:
                     for inducer_name, _ in inducer_layouts.items():
                         grid = all_molecule_grids[inducer_name]
                         try:
-                            value = float(grid[row, col])
-                            well.inducers[inducer_name] = value
-                        except (ValueError, TypeError, IndexError):
+                            well.inducers[inducer_name] = _cell_amount(grid[row, col])
+                        except IndexError:
                             well.inducers[inducer_name] = 0.0
 
                 # Populate antibiotics
@@ -349,9 +376,10 @@ class Plate:
                     for antibiotic_name, _ in antibiotic_layouts.items():
                         grid = all_molecule_grids[antibiotic_name]
                         try:
-                            value = float(grid[row, col])
-                            well.antibiotics[antibiotic_name] = value
-                        except (ValueError, TypeError, IndexError):
+                            well.antibiotics[antibiotic_name] = _cell_amount(
+                                grid[row, col]
+                            )
+                        except IndexError:
                             well.antibiotics[antibiotic_name] = 0.0
 
                 # Populate other modifications
@@ -359,9 +387,10 @@ class Plate:
                     for mod_name, _ in other_modification_layouts.items():
                         grid = all_molecule_grids[mod_name]
                         try:
-                            value = float(grid[row, col])
-                            well.other_modifications[mod_name] = value
-                        except (ValueError, TypeError, IndexError):
+                            well.other_modifications[mod_name] = _cell_amount(
+                                grid[row, col]
+                            )
+                        except IndexError:
                             well.other_modifications[mod_name] = 0.0
 
                 # Set units
@@ -375,7 +404,7 @@ class Plate:
         # Load media layout (still uses load_layout_csv since it's a string)
         if media_layout is not None:
             logger.info(f"Loading media layout from {media_layout}...")
-            self.load_layout_csv(media_layout, 'media')
+            self.load_layout_csv(media_layout, "media")
 
         logger.info(f"✅ Plate '{self.name}' fully loaded and configured")
 
@@ -391,7 +420,8 @@ class Plate:
             # Support (row, col) indexing
             row, col = well_id
             if isinstance(row, str):
-                row = ord(row.upper()) - ord('A')
+                # row_index handles AA, AB, ... -- ord() ran past 'Z'.
+                row = row_index(row)
             if isinstance(col, str):
                 col = int(col) - 1
             if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -438,28 +468,43 @@ class Plate:
 
     def get_wells_by_sample(self, sample_type: str) -> List[Well]:
         """Get all wells containing a specific sample type"""
-        return [well for well in self.wells.values()
-                if hasattr(well, 'sample_type') and well.sample_type == sample_type]
+        return [
+            well
+            for well in self.wells.values()
+            if hasattr(well, "sample_type") and well.sample_type == sample_type
+        ]
 
     def get_blank_wells(self) -> List[Well]:
         """Get all blank wells"""
-        return [well for well in self.wells.values()
-                if hasattr(well, 'is_blank') and well.is_blank]
+        return [
+            well
+            for well in self.wells.values()
+            if hasattr(well, "is_blank") and well.is_blank
+        ]
 
     def get_control_wells(self) -> List[Well]:
         """Get all control wells"""
-        return [well for well in self.wells.values()
-                if hasattr(well, 'is_control') and well.is_control]
+        return [
+            well
+            for well in self.wells.values()
+            if hasattr(well, "is_control") and well.is_control
+        ]
 
     def get_wells_by_concentration(self, concentration: float) -> List[Well]:
         """Get all wells with a specific concentration"""
-        return [well for well in self.wells.values()
-                if hasattr(well, 'concentration') and well.concentration == concentration]
+        return [
+            well
+            for well in self.wells.values()
+            if hasattr(well, "concentration") and well.concentration == concentration
+        ]
 
     def get_wells_by_type(self, well_type: str) -> List[Well]:
         """Get all wells of a specific type."""
-        return [well for well in self.wells.values()
-                if hasattr(well, 'well_type') and well.well_type == well_type]
+        return [
+            well
+            for well in self.wells.values()
+            if hasattr(well, "well_type") and well.well_type == well_type
+        ]
 
     def wells_flat(self) -> List[Well]:
         """
@@ -561,52 +606,70 @@ class Plate:
         """Set global time points for the entire plate"""
         self.global_time_points = np.array(time_points)
         for well in self.wells.values():
-            if hasattr(well, 'time_points') and well.time_points is None:
+            if hasattr(well, "time_points") and well.time_points is None:
                 time_points = self.global_time_points.copy()
                 well.time_points = time_points.reshape(-1)  # Ensure it's a 1D array
 
-    def get_plate_matrix(self, value_type: str = "fluorescence") -> np.ndarray:
+    def get_plate_matrix(
+        self, value_type: str = "concentration", timepoint_idx: int = -1
+    ) -> np.ndarray:
         """
-        Get plate data as a 2D matrix for visualization.
+        Plate data as a 2-D array matching the plate layout, for visualization.
 
         Parameters
         ----------
-        value_type : str, default "fluorescence"
-            Type of data to extract: "fluorescence", "concentration"
+        value_type : str, default "concentration"
+            ``"concentration"``, or the name of a measurement (e.g. ``"OD600"``)
+            to read each well's value at ``timepoint_idx``.
+        timepoint_idx : int, default -1
+            Timepoint for a measurement; the default is the last read.
 
         Returns
         -------
         np.ndarray
-            2D array representing the plate layout
+            ``(rows, cols)``, NaN where a well has no value.
+
+        Raises
+        ------
+        ValueError
+            If ``value_type`` is neither ``"concentration"`` nor a measurement
+            any well has. The old default, ``"fluorescence"``, read an
+            attribute wells no longer have and returned all NaN.
         """
+        if value_type != "concentration":
+            available = sorted(
+                {m for well in self.wells.values() for m in well.time_series}
+            )
+            if value_type not in available:
+                raise ValueError(
+                    f"No measurement {value_type!r} on plate '{self.name}'. Use "
+                    f"'concentration' or one of {available}."
+                )
+
         matrix = np.full((self.rows, self.cols), np.nan)
-
         for well in self.wells.values():
-            # Get row and column indices
-            if hasattr(well, 'row_index') and hasattr(well, 'column_index'):
-                row_idx = well.row_index
-                col_idx = well.column_index
+            if value_type == "concentration":
+                value = well.concentration
             else:
-                # Parse from well_id
-                row_idx, col_idx = parse_well_id(well.well_id)
-
-            if value_type == "fluorescence" and hasattr(well, 'fluorescence') and well.fluorescence is not None:
-                # Handle both single values and time series
-                if isinstance(well.fluorescence, list):
-                    matrix[row_idx, col_idx] = well.fluorescence[-1]  # Latest timepoint
-                else:
-                    matrix[row_idx, col_idx] = well.fluorescence
-            elif value_type == "concentration" and hasattr(well, 'concentration') and well.concentration is not None:
-                matrix[row_idx, col_idx] = well.concentration
-
+                series = well.time_series.get(value_type)
+                try:
+                    value = None if series is None else series[timepoint_idx]
+                except IndexError:
+                    value = None
+            if value is not None:
+                matrix[well.row, well.column] = value
         return matrix
 
     # ======================================================================
     # DATA EXPORT METHODS
     # ======================================================================
 
-    def to_dataframe(self, measurement_type: Optional[str] = None,
-                    include_metadata: bool = True, long_format: bool = True) -> pd.DataFrame:
+    def to_dataframe(
+        self,
+        measurement_type: Optional[str] = None,
+        include_metadata: bool = True,
+        long_format: bool = True,
+    ) -> pd.DataFrame:
         """
         Convert plate data to a pandas DataFrame for analysis
 
@@ -624,35 +687,58 @@ class Plate:
 
         for well_id, well in self.wells.items():
             base_data = {
-                'well_id': well_id,
-                'row': well.well_id[0],
-                'column': int(well.well_id[1:]),
-                'sample_type': getattr(well, 'sample_type', None),
-                'concentration': getattr(well, 'concentration', None),
-                'is_blank': getattr(well, 'is_blank', False),
-                'is_control': getattr(well, 'is_control', False)
+                "well_id": well_id,
+                "row": well.row_letter,
+                "column": well.column_number,
+                "sample_type": getattr(well, "sample_type", None),
+                "concentration": getattr(well, "concentration", None),
+                "is_blank": getattr(well, "is_blank", False),
+                "is_control": getattr(well, "is_control", False),
             }
 
-            if measurement_type and hasattr(well, 'time_series') and measurement_type in well.time_series and long_format:
+            if (
+                measurement_type
+                and hasattr(well, "time_series")
+                and measurement_type in well.time_series
+                and long_format
+            ):
                 # Long format: one row per time point
                 time_series_data = well.time_series[measurement_type]
-                time_points = getattr(well, 'time_points', list(range(len(time_series_data))))
+                time_points = getattr(
+                    well, "time_points", list(range(len(time_series_data)))
+                )
 
-                for i, (time_point, value) in enumerate(zip(time_points, time_series_data)):
+                for i, (time_point, value) in enumerate(
+                    zip(time_points, time_series_data)
+                ):
                     row_data = base_data.copy()
-                    row_data.update({
-                        'time_point': time_point,
-                        'time_index': i,
-                        measurement_type: value
-                    })
+                    row_data.update(
+                        {
+                            "time_point": time_point,
+                            "time_index": i,
+                            measurement_type: value,
+                        }
+                    )
                     data_rows.append(row_data)
             else:
                 # Wide format: one row per well
-                if measurement_type and hasattr(well, 'time_series') and measurement_type in well.time_series:
-                    base_data[f'{measurement_type}_final'] = well.time_series[measurement_type][-1]
-                    base_data[f'{measurement_type}_initial'] = well.time_series[measurement_type][0]
-                    base_data[f'{measurement_type}_max'] = max(well.time_series[measurement_type])
-                    base_data[f'{measurement_type}_min'] = min(well.time_series[measurement_type])
+                if (
+                    measurement_type
+                    and hasattr(well, "time_series")
+                    and measurement_type in well.time_series
+                ):
+                    base_data[f"{measurement_type}_final"] = well.time_series[
+                        measurement_type
+                    ][-1]
+                    base_data[f"{measurement_type}_initial"] = well.time_series[
+                        measurement_type
+                    ][0]
+                    base_data[f"{measurement_type}_max"] = max(
+                        well.time_series[measurement_type]
+                    )
+                    base_data[f"{measurement_type}_min"] = min(
+                        well.time_series[measurement_type]
+                    )
 
                 data_rows.append(base_data)
 
@@ -662,8 +748,15 @@ class Plate:
     # DATA LOADING METHODS
     # ======================================================================
 
-    def load_from_arrays(self, sample_map: np.ndarray, conc_map: Union[np.ndarray, List[List[float]]],
-                        data_dict: Dict[str, np.ndarray], time_dict: Dict[str, np.ndarray], controls: List[str] = [], blanks: List[str] = []):
+    def load_from_arrays(
+        self,
+        sample_map: np.ndarray,
+        conc_map: Union[np.ndarray, List[List[float]]],
+        data_dict: Dict[str, np.ndarray],
+        time_dict: Dict[str, np.ndarray],
+        controls: List[str] = [],
+        blanks: List[str] = [],
+    ):
         """
         Load data from numpy arrays (compatible with platereadertools output)
 
@@ -681,7 +774,7 @@ class Plate:
         logger.info(f"Loading data into {self.format}-well plate '{self.name}'...")
 
         # Determine the dimensions to iterate over
-        if hasattr(sample_map, 'shape'):  # numpy array
+        if hasattr(sample_map, "shape"):  # numpy array
             max_rows = min(self.rows, sample_map.shape[0])
             max_cols = min(self.cols, sample_map.shape[1])
         else:  # list of lists
@@ -701,16 +794,16 @@ class Plate:
 
                 # Extract sample type (handle both numpy arrays and lists)
                 if sample_map is not None:
-                    if hasattr(sample_map, 'shape'):  # numpy array
-                        sample_type = sample_map[row, col]
+                    if hasattr(sample_map, "shape"):  # numpy array
+                        sample_type = _cell_label(sample_map[row, col])
                     else:  # list of lists
-                        sample_type = sample_map[row][col]
+                        sample_type = _cell_label(sample_map[row][col])
                 else:
                     sample_type = None
 
                 # Extract concentration (handle both numpy arrays and lists)
                 if conc_map is not None:
-                    if hasattr(conc_map, 'shape'):  # numpy array
+                    if hasattr(conc_map, "shape"):  # numpy array
                         concentration = float(conc_map[row, col])
                     else:  # list of lists
                         concentration = float(conc_map[row][col])
@@ -718,13 +811,21 @@ class Plate:
                     concentration = None
 
                 # Determine well classification
-                is_blank = str(sample_type) in blanks if blanks and sample_type else False
-                is_control = str(sample_type) in controls if controls and sample_type else False
+                is_blank = (
+                    str(sample_type) in blanks if blanks and sample_type else False
+                )
+                is_control = (
+                    str(sample_type) in controls if controls and sample_type else False
+                )
 
                 if is_blank:
-                    logger.info(f"Identified blank well: {well_id} (sample type: {sample_type})")
+                    logger.info(
+                        f"Identified blank well: {well_id} (sample type: {sample_type})"
+                    )
                 if is_control:
-                    logger.info(f"Identified control well: {well_id} (sample type: {sample_type})")
+                    logger.info(
+                        f"Identified control well: {well_id} (sample type: {sample_type})"
+                    )
 
                 # Set well attributes directly
                 well.sample_type = sample_type
@@ -734,7 +835,7 @@ class Plate:
 
                 # Add time series data for each measurement type
                 for measurement_type, data_array in data_dict.items():
-                    if hasattr(data_array, 'shape') and len(data_array.shape) >= 2:
+                    if hasattr(data_array, "shape") and len(data_array.shape) >= 2:
                         # Extract time series for this well
                         if len(data_array.shape) == 3:
                             well_data = data_array[row, col, :]
@@ -750,15 +851,21 @@ class Plate:
                 wells_loaded += 1
 
         logger.info(f"✅ Successfully loaded data into {wells_loaded} wells")
-        logger.info(f"   Sample types found: {len(set(w.sample_type for w in self.wells.values() if w.sample_type))}")
+        logger.info(
+            f"   Sample types found: {len(set(w.sample_type for w in self.wells.values() if w.sample_type))}"
+        )
 
         # Only show concentration info if concentrations were provided
-        concentrations = [w.concentration for w in self.wells.values() if w.concentration is not None]
+        concentrations = [
+            w.concentration for w in self.wells.values() if w.concentration is not None
+        ]
         if concentrations:
-            logger.info(f"   Concentration range: {min(concentrations):.6f} - {max(concentrations):.6f}")
+            logger.info(
+                f"   Concentration range: {min(concentrations):.6f} - {max(concentrations):.6f}"
+            )
             logger.info(f"   Wells with concentrations: {len(concentrations)}")
         else:
-            logger.info(f"   No concentrations loaded")
+            logger.info("   No concentrations loaded")
 
         logger.info(f"   Measurements loaded: {list(data_dict.keys())}")
 
@@ -794,37 +901,43 @@ class Plate:
         return sample_map
 
     def print_concentration_summary(self):
-        """Print a summary of concentrations in the plate"""
-        concentrations = [w.concentration for w in self.wells.values() if w.concentration is not None]
+        """
+        Print a summary of concentrations in the plate.
 
-        if concentrations:
-            logger.info(f"Concentration Summary for {self.name}:")
-            logger.info(f"  Range: {min(concentrations):.6f} - {max(concentrations):.6f}")
-            logger.info(f"  Unique values: {len(set(concentrations))}")
-            logger.info(f"  Wells with concentrations: {len(concentrations)}")
+        Prints rather than logs: it is called to show the summary. Logging it
+        left it invisible unless logging had been configured.
+        """
+        concentrations = [
+            w.concentration for w in self.wells.values() if w.concentration is not None
+        ]
 
-            # Show unique concentrations
-            unique_concs = sorted(set(concentrations))
-            logger.info(f"  Unique concentrations: {unique_concs}")
-        else:
-            logger.info(f"No concentrations found in plate {self.name}")
+        if not concentrations:
+            print(f"No concentrations found in plate {self.name}")
+            return
+
+        print(f"Concentration Summary for {self.name}:")
+        print(f"  Range: {min(concentrations):.6f} - {max(concentrations):.6f}")
+        print(f"  Unique values: {len(set(concentrations))}")
+        print(f"  Wells with concentrations: {len(concentrations)}")
+        print(f"  Unique concentrations: {sorted(set(concentrations))}")
 
     def print_sample_summary(self):
-        """Print a summary of sample types in the plate"""
-        sample_types = [w.sample_type for w in self.wells.values() if w.sample_type is not None]
+        """Print a summary of sample types in the plate. See print_concentration_summary."""
+        from collections import Counter
 
-        if sample_types:
-            logger.info(f"Sample Summary for {self.name}:")
-            logger.info(f"  Unique sample types: {len(set(sample_types))}")
-            logger.info(f"  Wells with samples: {len(sample_types)}")
+        sample_types = [
+            w.sample_type for w in self.wells.values() if w.sample_type is not None
+        ]
 
-            # Show sample type counts
-            from collections import Counter
-            sample_counts = Counter(sample_types)
-            for sample_type, count in sample_counts.items():
-                logger.info(f"    {sample_type}: {count} wells")
-        else:
-            logger.info(f"No samples found in plate {self.name}")
+        if not sample_types:
+            print(f"No samples found in plate {self.name}")
+            return
+
+        print(f"Sample Summary for {self.name}:")
+        print(f"  Unique sample types: {len(set(sample_types))}")
+        print(f"  Wells with samples: {len(sample_types)}")
+        for sample_type, count in Counter(sample_types).items():
+            print(f"    {sample_type}: {count} wells")
 
     def validate_concentration_loading(self) -> bool:
         """
@@ -834,20 +947,24 @@ class Plate:
         --------
         bool : True if concentrations are properly loaded, False otherwise
         """
-        wells_with_conc = [w for w in self.wells.values() if w.concentration is not None]
+        wells_with_conc = [
+            w for w in self.wells.values() if w.concentration is not None
+        ]
 
         if not wells_with_conc:
             logger.info("❌ No wells have concentration data loaded")
             return False
 
-        logger.info(f"✅ Concentration validation passed:")
+        logger.info("✅ Concentration validation passed:")
         logger.info(f"   {len(wells_with_conc)} wells have concentration data")
 
         # Show a few examples
         sample_wells = wells_with_conc[:5]  # First 5 wells with concentrations
-        logger.info(f"   Example wells:")
+        logger.info("   Example wells:")
         for well in sample_wells:
-            logger.info(f"     {well.well_id}: {well.sample_type} at {well.concentration}")
+            logger.info(
+                f"     {well.well_id}: {well.sample_type} at {well.concentration}"
+            )
 
         return True
 
@@ -859,7 +976,7 @@ class Plate:
         """Exclude a specific well from analysis"""
         well = self[well_id]
         if well:
-            if hasattr(well, 'exclude_well'):
+            if hasattr(well, "exclude_well"):
                 well.exclude_well(reason)
             else:
                 well.exclude = True
@@ -872,7 +989,7 @@ class Plate:
         """Include a previously excluded well back in analysis"""
         well = self[well_id]
         if well:
-            if hasattr(well, 'include_well'):
+            if hasattr(well, "include_well"):
                 well.include_well()
             else:
                 well.exclude = False
@@ -883,13 +1000,11 @@ class Plate:
 
     def get_excluded_wells(self) -> List[Well]:
         """Get all excluded wells"""
-        return [well for well in self.wells.values()
-                if well.is_excluded()]
+        return [well for well in self.wells.values() if well.is_excluded()]
 
     def get_included_wells(self) -> List[Well]:
         """Get all non-excluded wells"""
-        return [well for well in self.wells.values()
-                if not (well.is_excluded())]
+        return [well for well in self.wells.values() if not (well.is_excluded())]
 
     # ======================================================================
     # CSV LAYOUT LOADING METHODS
@@ -913,56 +1028,80 @@ class Plate:
         Returns
         -------
         np.ndarray
-            2D array of string values with shape (n_rows, n_cols)
+            2D array of string values with shape (n_rows, n_cols). Empty cells
+            are empty strings.
         """
-        df = pd.read_csv(csv_path, index_col=0)
+        # dtype=str with keep_default_na=False keeps each cell's text as is.
+        # pandas' default reads an empty cell as NaN, which then became the
+        # string 'nan' -- a sample of empty wells named 'nan', and NaN amounts
+        # that never compare equal to anything.
+        df = pd.read_csv(csv_path, index_col=0, dtype=str, keep_default_na=False)
         return df.values.astype(str)
 
-    def load_layout_csv(self, csv_path: str, attribute: str) -> None:
+    def load_layout_csv(
+        self, csv_path: str, attribute: str, category: str = "inducer"
+    ) -> None:
         """
         Load a plate layout CSV and apply it to wells.
 
         Parameters
         ----------
         csv_path : str
-            Path to an 8×12 grid CSV file
+            Path to a grid CSV file: row letters as the index, column numbers
+            as the header.
         attribute : str
-            What the CSV describes:
-            - ``'media'``: sets ``well.medium``
-            - ``'antibiotics'``: sets ``well.antibiotics`` (normalizes em-dash to None)
-            - Any other string: treated as an inducer name, sets
-              ``well.inducers[attribute] = float(value)``
+            ``'media'`` sets ``well.medium`` from the cell text. Anything else
+            names a molecule, and each cell is its amount in that well; an
+            empty cell is 0.
+        category : {'inducer', 'antibiotic', 'modification'}, default 'inducer'
+            Which dict the amounts go into: ``well.inducers``,
+            ``well.antibiotics`` or ``well.other_modifications``.
+
+        Raises
+        ------
+        ValueError
+            For ``attribute='antibiotics'``: that form read cells of antibiotic
+            *names* into ``well.antibiotics``, which holds amounts everywhere
+            else, and broke every later step. Load each antibiotic's amounts by
+            name instead, e.g. ``load_layout_csv(path, 'Kan',
+            category='antibiotic')``. Also for an unknown ``category``.
         """
+        if attribute == "antibiotics":
+            raise ValueError(
+                "load_layout_csv(path, 'antibiotics') no longer reads antibiotic "
+                "names. Load each antibiotic's amounts under its name: "
+                "plate.load_layout_csv(path, 'Kan', category='antibiotic'), or "
+                "load_plate_layouts(media_csv, antibiotics_csv={'Kan': path})."
+            )
+        if attribute != "media" and category not in _LAYOUT_CATEGORIES:
+            raise ValueError(
+                f"Unknown layout category {category!r}; expected one of "
+                f"{sorted(_LAYOUT_CATEGORIES)}"
+            )
+
         grid = self._read_grid_csv(csv_path)
         n_rows, n_cols = grid.shape
 
         for row_idx in range(min(n_rows, self.rows)):
             for col_idx in range(min(n_cols, self.cols)):
-                well_id = make_well_id(row_idx, col_idx)
-                well = self.wells.get(well_id)
+                well = self.wells.get(make_well_id(row_idx, col_idx))
                 if well is None:
                     continue
 
-                value = grid[row_idx, col_idx].strip()
-
-                if attribute == 'media':
-                    well.medium = value if value else None
-                elif attribute == 'antibiotics':
-                    # Normalize em-dash and en-dash to None
-                    if value in ('—', '–', '-', '', 'nan', 'None', 'none'):
-                        well.antibiotics = None
-                    else:
-                        well.antibiotics = value
+                cell = grid[row_idx, col_idx]
+                if attribute == "media":
+                    well.medium = _cell_label(cell)
                 else:
-                    # Treat as inducer: parse numeric value
-                    try:
-                        well.inducers[attribute] = float(value)
-                    except (ValueError, TypeError):
-                        well.inducers[attribute] = 0.0
+                    amounts = getattr(well, _LAYOUT_CATEGORIES[category])
+                    amounts[attribute] = _cell_amount(cell)
 
-    def load_plate_layouts(self, media_csv: str,
-                           antibiotics_csv: Optional[str] = None,
-                           inducer_csvs: Optional[Dict[str, str]] = None) -> None:
+    def load_plate_layouts(
+        self,
+        media_csv: str,
+        antibiotics_csv: Optional[Dict[str, str]] = None,
+        inducer_csvs: Optional[Dict[str, str]] = None,
+        modification_csvs: Optional[Dict[str, str]] = None,
+    ) -> None:
         """
         Load multiple plate layout CSVs at once.
 
@@ -970,20 +1109,38 @@ class Plate:
         ----------
         media_csv : str
             Path to the media layout CSV
-        antibiotics_csv : str, optional
-            Path to the antibiotics layout CSV
+        antibiotics_csv : Dict[str, str], optional
+            Mapping of antibiotic name to the CSV of its amount in each well,
+            e.g. ``{'Kan': 'layouts/kan.csv'}``. The same form as
+            ``inducer_csvs`` and as ``Plate(antibiotic_layouts=...)``.
         inducer_csvs : Dict[str, str], optional
             Mapping of inducer name to CSV path, e.g.
             ``{'aTc_ng_mL': '/path/to/atc.csv', 'IPTG_mM': '/path/to/iptg.csv'}``
+        modification_csvs : Dict[str, str], optional
+            Mapping of other modification name to CSV path.
+
+        Raises
+        ------
+        TypeError
+            If ``antibiotics_csv`` is a single path. That used to store each
+            cell's text in ``well.antibiotics``; pass ``{name: path}`` instead.
         """
-        self.load_layout_csv(media_csv, 'media')
+        if antibiotics_csv is not None and not isinstance(antibiotics_csv, dict):
+            raise TypeError(
+                "antibiotics_csv takes a dict of antibiotic name to layout path, "
+                "e.g. {'Kan': 'layouts/kan.csv'}, with each cell the amount in "
+                f"that well. Got {type(antibiotics_csv).__name__}."
+            )
 
-        if antibiotics_csv is not None:
-            self.load_layout_csv(antibiotics_csv, 'antibiotics')
+        self.load_layout_csv(media_csv, "media")
 
-        if inducer_csvs is not None:
-            for inducer_name, csv_path in inducer_csvs.items():
-                self.load_layout_csv(csv_path, inducer_name)
+        for category, layouts in (
+            ("antibiotic", antibiotics_csv),
+            ("inducer", inducer_csvs),
+            ("modification", modification_csvs),
+        ):
+            for name, csv_path in (layouts or {}).items():
+                self.load_layout_csv(csv_path, name, category=category)
 
     # ======================================================================
     # VISUALIZATION METHODS
@@ -992,6 +1149,7 @@ class Plate:
     def plot_timeseries_grid(self, measurement_type: str, **kwargs):
         """Plot raw timeseries grid. See :func:`fluoropy.core.plotting.plot_timeseries_grid`."""
         from .plotting import plot_timeseries_grid
+
         return plot_timeseries_grid(self, measurement_type, **kwargs)
 
     # ======================================================================
@@ -1006,55 +1164,87 @@ class Plate:
     # Imports are function-local: analysis imports from core, so importing it
     # at module scope would be circular.
 
-    def calculate_timepoint_statistics(self, measurement_type: str, timepoint_idx: int,
-                                       sample_types: Optional[List[str]] = None,
-                                       exclude_blanks: bool = True,
-                                       exclude_controls: bool = False) -> Dict[str, Dict[str, Any]]:
+    def calculate_timepoint_statistics(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        sample_types: Optional[List[str]] = None,
+        exclude_blanks: bool = True,
+        exclude_controls: bool = False,
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Summary statistics per (sample type, concentration) at one timepoint.
 
         See :func:`fluoropy.analysis.plate_statistics.calculate_timepoint_statistics`.
         """
         from ..analysis.plate_statistics import calculate_timepoint_statistics
+
         return calculate_timepoint_statistics(
-            self, measurement_type, timepoint_idx, sample_types,
-            exclude_blanks, exclude_controls,
+            self,
+            measurement_type,
+            timepoint_idx,
+            sample_types,
+            exclude_blanks,
+            exclude_controls,
         )
 
-    def get_timepoint_summary_table(self, measurement_type: str, timepoint_idx: int,
-                                    sample_types: Optional[List[str]] = None,
-                                    exclude_blanks: bool = True,
-                                    exclude_controls: bool = False,
-                                    include_outliers: bool = True) -> 'pd.DataFrame':
+    def get_timepoint_summary_table(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        sample_types: Optional[List[str]] = None,
+        exclude_blanks: bool = True,
+        exclude_controls: bool = False,
+        include_outliers: bool = True,
+    ) -> "pd.DataFrame":
         """
         The same statistics as a formatted DataFrame.
 
         See :func:`fluoropy.analysis.plate_statistics.get_timepoint_summary_table`.
         """
         from ..analysis.plate_statistics import get_timepoint_summary_table
+
         return get_timepoint_summary_table(
-            self, measurement_type, timepoint_idx, sample_types,
-            exclude_blanks, exclude_controls, include_outliers,
+            self,
+            measurement_type,
+            timepoint_idx,
+            sample_types,
+            exclude_blanks,
+            exclude_controls,
+            include_outliers,
         )
 
-    def get_outlier_wells(self, measurement_type: str, timepoint_idx: int,
-                          sample_types: Optional[List[str]] = None,
-                          exclude_blanks: bool = True,
-                          exclude_controls: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+    def get_outlier_wells(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        sample_types: Optional[List[str]] = None,
+        exclude_blanks: bool = True,
+        exclude_controls: bool = False,
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         IQR outliers per (sample type, concentration) group.
 
         See :func:`fluoropy.analysis.plate_statistics.get_outlier_wells`.
         """
         from ..analysis.plate_statistics import get_outlier_wells
+
         return get_outlier_wells(
-            self, measurement_type, timepoint_idx, sample_types,
-            exclude_blanks, exclude_controls,
+            self,
+            measurement_type,
+            timepoint_idx,
+            sample_types,
+            exclude_blanks,
+            exclude_controls,
         )
 
-    def calculate_zscore_normalization(self, measurement_type: str, timepoint_idx: int,
-                                       exclude_blanks: bool = True,
-                                       exclude_controls: bool = False) -> Dict[str, float]:
+    def calculate_zscore_normalization(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        exclude_blanks: bool = True,
+        exclude_controls: bool = False,
+    ) -> Dict[str, float]:
         """
         Plate-wide z-score per well, using the mean and standard deviation.
 
@@ -1062,39 +1252,63 @@ class Plate:
         and :func:`fluoropy.analysis.robust_z_score` for the median/MAD variant.
         """
         from ..analysis.plate_statistics import calculate_zscore_normalization
+
         return calculate_zscore_normalization(
-            self, measurement_type, timepoint_idx, exclude_blanks, exclude_controls,
+            self,
+            measurement_type,
+            timepoint_idx,
+            exclude_blanks,
+            exclude_controls,
         )
 
-    def apply_zscore_normalization(self, measurement_type: str, timepoint_idx: int,
-                                   exclude_blanks: bool = True,
-                                   exclude_controls: bool = False,
-                                   store_in_metadata: bool = True) -> Dict[str, float]:
+    def apply_zscore_normalization(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        exclude_blanks: bool = True,
+        exclude_controls: bool = False,
+        store_in_metadata: bool = True,
+    ) -> Dict[str, float]:
         """
         Calculate z-scores and optionally record them in well metadata.
 
         See :func:`fluoropy.analysis.plate_statistics.apply_zscore_normalization`.
         """
         from ..analysis.plate_statistics import apply_zscore_normalization
+
         return apply_zscore_normalization(
-            self, measurement_type, timepoint_idx, exclude_blanks,
-            exclude_controls, store_in_metadata,
+            self,
+            measurement_type,
+            timepoint_idx,
+            exclude_blanks,
+            exclude_controls,
+            store_in_metadata,
         )
 
-    def get_zscore_matrix(self, measurement_type: str, timepoint_idx: int,
-                          exclude_blanks: bool = True,
-                          exclude_controls: bool = False) -> np.ndarray:
+    def get_zscore_matrix(
+        self,
+        measurement_type: str,
+        timepoint_idx: int,
+        exclude_blanks: bool = True,
+        exclude_controls: bool = False,
+    ) -> np.ndarray:
         """
         Z-scores as a 2-D array matching the plate layout, for visualization.
 
         See :func:`fluoropy.analysis.plate_statistics.get_zscore_matrix`.
         """
         from ..analysis.plate_statistics import get_zscore_matrix
+
         return get_zscore_matrix(
-            self, measurement_type, timepoint_idx, exclude_blanks, exclude_controls,
+            self,
+            measurement_type,
+            timepoint_idx,
+            exclude_blanks,
+            exclude_controls,
         )
 
     def plot_zscore_heatmap(self, measurement_type: str, timepoint_idx: int, **kwargs):
         """Plot z-score heatmap. See :func:`fluoropy.core.plotting.plot_zscore_heatmap`."""
         from .plotting import plot_zscore_heatmap
+
         return plot_zscore_heatmap(self, measurement_type, timepoint_idx, **kwargs)

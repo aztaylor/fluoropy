@@ -49,9 +49,9 @@ def _build_wells(concentrations=None, measurements=("m",)):
 def _assert_aligned(sample, measurement="m", scale=100):
     """Every column must carry the value implied by its own label."""
     row = sample.time_series_mean[measurement][0]
-    assert len(row) == len(sample.concentrations), (
-        f"data has {len(row)} columns but {len(sample.concentrations)} labels"
-    )
+    assert len(row) == len(
+        sample.concentrations
+    ), f"data has {len(row)} columns but {len(sample.concentrations)} labels"
     for conc, value in zip(sample.concentrations, row):
         assert value == pytest.approx(conc * scale)
 
@@ -69,6 +69,7 @@ def test_data_aligns_with_concentration_labels():
 # ---------------------------------------------------------------------------
 # exclusion
 # ---------------------------------------------------------------------------
+
 
 def test_excluding_highest_concentration_keeps_axes_aligned():
     wells = _build_wells()
@@ -124,6 +125,7 @@ def test_reincluding_a_well_restores_the_full_axis():
 # ordering
 # ---------------------------------------------------------------------------
 
+
 def test_position_ordering_keeps_axes_aligned():
     """Plate-position order deliberately differs from descending value here."""
     wells = _build_wells(concentrations=[0.1, 0.5, 0.2])
@@ -150,6 +152,7 @@ def test_switching_ordering_back_and_forth_keeps_axes_aligned():
 # ---------------------------------------------------------------------------
 # multiple measurements
 # ---------------------------------------------------------------------------
+
 
 def test_recalculating_one_measurement_preserves_the_others():
     """
@@ -181,6 +184,7 @@ def test_excluding_a_well_realigns_every_measurement():
 # ---------------------------------------------------------------------------
 # the guard
 # ---------------------------------------------------------------------------
+
 
 def test_axis_mismatch_raises_rather_than_mislabelling():
     """

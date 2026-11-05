@@ -1,7 +1,8 @@
 """Tests for import_data utility."""
-import io
-import tempfile
+
 import os
+import tempfile
+
 import numpy as np
 import pytest
 
@@ -10,13 +11,17 @@ from fluoropy.utils.import_data import import_results
 
 def _write_temp_file(content: str) -> str:
     """Write content to a temp file and return its path."""
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="iso-8859-1")
+    f = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="iso-8859-1"
+    )
     f.write(content)
     f.close()
     return f.name
 
 
-def _make_gen5_txt(read_label: str, rows: int, cols: int, timepoints: list, with_time_header: bool) -> str:
+def _make_gen5_txt(
+    read_label: str, rows: int, cols: int, timepoints: list, with_time_header: bool
+) -> str:
     """Generate a minimal Gen5-style txt file."""
     well_headers = "\t".join(
         f"{chr(65 + r)}{c + 1}" for r in range(rows) for c in range(cols)
@@ -41,7 +46,14 @@ def test_import_results_without_time_header():
     content = _make_gen5_txt("600", 1, 4, TIMEPOINTS, with_time_header=False)
     path = _write_temp_file(content)
     try:
-        data, time, _ = import_results(path, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
+        data, time, _ = import_results(
+            path,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
         assert "600" in data
         assert data["600"].shape == (1, 4, 2)
         assert time["600"].shape == (2, 1)
@@ -54,7 +66,14 @@ def test_import_results_with_time_header():
     content = _make_gen5_txt("600", 1, 4, TIMEPOINTS, with_time_header=True)
     path = _write_temp_file(content)
     try:
-        data, time, _ = import_results(path, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
+        data, time, _ = import_results(
+            path,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
         assert "600" in data
         assert data["600"].shape == (1, 4, 2)
         # First timepoint values should be 1.0, 2.0, 3.0, 4.0
@@ -72,10 +91,75 @@ def test_time_header_does_not_increment_timepoint():
     path_with = _write_temp_file(content_with)
     path_without = _write_temp_file(content_without)
     try:
-        data_with, time_with, _ = import_results(path_with, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
-        data_without, time_without, _ = import_results(path_without, n_rows=1, n_cols=4, run_time=2/60, sampling_rate=1/60, read_labels=["600"])
+        data_with, time_with, _ = import_results(
+            path_with,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
+        data_without, time_without, _ = import_results(
+            path_without,
+            n_rows=1,
+            n_cols=4,
+            run_time=2 / 60,
+            sampling_rate=1 / 60,
+            read_labels=["600"],
+        )
         np.testing.assert_array_equal(data_with["600"], data_without["600"])
         np.testing.assert_array_equal(time_with["600"], time_without["600"])
     finally:
         os.unlink(path_with)
         os.unlink(path_without)
+
+
+def _rows(times):
+    return [
+        (t, [float(i), float(i + 1), float(i + 2), float(i + 3)])
+        for i, t in enumerate(times)
+    ]
+
+
+def _import(content, run_time, sampling_rate):
+    path = _write_temp_file(content)
+    try:
+        return import_results(
+            path,
+            n_rows=1,
+            n_cols=4,
+            run_time=run_time,
+            sampling_rate=sampling_rate,
+            read_labels=["600"],
+        )
+    finally:
+        os.unlink(path)
+
+
+def test_decimal_sampling_rate_keeps_every_read():
+    """int(0.7 / 0.1) is 6, which used to drop the seventh read."""
+    times = [f"0:{6 * i:02d}:00" for i in range(1, 8)]  # every 0.1 h, 7 reads
+    data, time, _ = _import(_make_gen5_txt("600", 1, 4, _rows(times), False), 0.7, 0.1)
+
+    assert data["600"].shape == (1, 4, 7)
+    assert time["600"][-1, 0] == pytest.approx(0.7)
+    np.testing.assert_array_equal(data["600"][0, :, 6], [6.0, 7.0, 8.0, 9.0])
+
+
+def test_reads_beyond_run_time_are_kept_not_dropped():
+    """A read at t = 0 makes one more row than run_time / sampling_rate."""
+    times = ["0:00:00", "0:01:00", "0:02:00"]
+    data, time, _ = _import(
+        _make_gen5_txt("600", 1, 4, _rows(times), False), 2 / 60, 1 / 60
+    )
+
+    assert data["600"].shape == (1, 4, 3)
+    np.testing.assert_array_equal(data["600"][0, :, 2], [2.0, 3.0, 4.0, 5.0])
+
+
+def test_non_time_lines_after_a_read_are_ignored():
+    content = _make_gen5_txt("600", 1, 4, _rows(["0:01:00", "0:02:00"]), False)
+    content += "Results\tsomething\nWell\tA1\tA2\n"
+    data, _, _ = _import(content, 2 / 60, 1 / 60)
+
+    assert data["600"].shape == (1, 4, 2)

@@ -1,15 +1,16 @@
 """
-Test script for plotting replicate time series curves in SampleFrame.
+SampleFrame.plot_replicate_time_series on synthetic plates.
 
-Creates synthetic microplate reader data with multiple samples at different
-concentrations, replicates across wells, and demonstrates the plotting functionality.
+These used to print what they saw and call plt.show(), with no assertions,
+so they passed whatever was drawn. Error handling lives in
+test_error_handling.py.
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pytest
+
 from fluoropy.core.plate import Plate
-from fluoropy.core.well import Well
-from fluoropy.core.sample import Sample
 from fluoropy.core.sampleframe import SampleFrame
 
 
@@ -44,7 +45,13 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
     well_counter = 0
 
     # Generate synthetic data for each sample
-    for sample_name, concentrations, row_start, col_start, n_replicates in sample_configs:
+    for (
+        sample_name,
+        concentrations,
+        row_start,
+        col_start,
+        n_replicates,
+    ) in sample_configs:
         for conc_idx, conc in enumerate(concentrations):
             for rep in range(n_replicates):
                 row = row_start + conc_idx
@@ -57,7 +64,7 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
                     concentration=conc,
                     medium="LB",
                     is_blank=False,
-                    is_control=False
+                    is_control=False,
                 )
 
                 # Generate synthetic time series data
@@ -71,7 +78,12 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
                 noise = np.random.normal(0, 0.02, n_timepoints)
 
                 # Logistic growth curve
-                od_data = od_baseline + (od_max - od_baseline) / (1 + np.exp(-growth_rate * (time_points - 12))) + noise
+                od_data = (
+                    od_baseline
+                    + (od_max - od_baseline)
+                    / (1 + np.exp(-growth_rate * (time_points - 12)))
+                    + noise
+                )
                 od_data = np.maximum(od_data, od_baseline)  # Ensure no negative values
 
                 # GFP fluorescence (correlated with OD but with different kinetics)
@@ -81,7 +93,12 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
                 gfp_growth_rate = 0.3
 
                 time_offset = np.maximum(time_points - gfp_lag, 0)
-                gfp_data = gfp_baseline + (gfp_max - gfp_baseline) / (1 + np.exp(-gfp_growth_rate * (time_offset - 8))) + np.random.normal(0, 200, n_timepoints)
+                gfp_data = (
+                    gfp_baseline
+                    + (gfp_max - gfp_baseline)
+                    / (1 + np.exp(-gfp_growth_rate * (time_offset - 8)))
+                    + np.random.normal(0, 200, n_timepoints)
+                )
                 gfp_data = np.maximum(gfp_data, gfp_baseline)
 
                 # Assign data to well
@@ -93,24 +110,24 @@ def create_synthetic_plate(plate_name: str = "SyntheticPlate") -> Plate:
 
     # Add blank wells
     blank_well = plate.get_well_by_position(7, 0)
-    blank_well.set_sample_info(
-        sample_type="blank",
-        medium="LB",
-        is_blank=True
-    )
+    blank_well.set_sample_info(sample_type="blank", medium="LB", is_blank=True)
     blank_well.time_points = time_points
-    blank_well.time_series["OD600"] = np.ones(n_timepoints) * 0.02 + np.random.normal(0, 0.01, n_timepoints)
-    blank_well.time_series["GFP"] = np.ones(n_timepoints) * 50 + np.random.normal(0, 10, n_timepoints)
+    blank_well.time_series["OD600"] = np.ones(n_timepoints) * 0.02 + np.random.normal(
+        0, 0.01, n_timepoints
+    )
+    blank_well.time_series["GFP"] = np.ones(n_timepoints) * 50 + np.random.normal(
+        0, 10, n_timepoints
+    )
 
     blank_well2 = plate.get_well_by_position(7, 1)
-    blank_well2.set_sample_info(
-        sample_type="blank",
-        medium="LB",
-        is_blank=True
-    )
+    blank_well2.set_sample_info(sample_type="blank", medium="LB", is_blank=True)
     blank_well2.time_points = time_points
-    blank_well2.time_series["OD600"] = np.ones(n_timepoints) * 0.02 + np.random.normal(0, 0.01, n_timepoints)
-    blank_well2.time_series["GFP"] = np.ones(n_timepoints) * 50 + np.random.normal(0, 10, n_timepoints)
+    blank_well2.time_series["OD600"] = np.ones(n_timepoints) * 0.02 + np.random.normal(
+        0, 0.01, n_timepoints
+    )
+    blank_well2.time_series["GFP"] = np.ones(n_timepoints) * 50 + np.random.normal(
+        0, 10, n_timepoints
+    )
 
     return plate
 
@@ -136,205 +153,81 @@ def create_multi_plate_experiment(n_plates: int = 2) -> list:
     return plates
 
 
-def test_single_plate_plotting():
-    """Test plotting replicates from a single plate."""
-    print("\n" + "="*70)
-    print("TEST 1: Single Plate Replicate Plotting")
-    print("="*70)
-
-    # Create synthetic plate
-    plate = create_synthetic_plate("SyntheticPlate_1")
-
-    # Create SampleFrame
-    frame = SampleFrame(plate)
-    print(f"\nCreated SampleFrame: {frame}")
-    print(f"Samples: {frame.get_sample_list()}")
-
-    # Check data structure
-    print("\nData structure:")
-    for sample_id in ['s14', 's15', 's16']:
-        sample = frame[sample_id]
-        print(f"  {sample_id}: {len(sample.wells)} wells")
-        # Group by concentration
-        conc_groups = {}
-        for well in sample.wells:
-            conc = well.concentration
-            if conc not in conc_groups:
-                conc_groups[conc] = []
-            conc_groups[conc].append(well)
-        for conc, wells in sorted(conc_groups.items()):
-            print(f"    [{conc}]: {len(wells)} replicates")
-
-    # Plot OD600 replicates
-    print("\nPlotting OD600 replicates...")
-    fig_od, axes_od = frame.plot_replicate_time_series(
-        'OD600',
-        sample_ids=['s14', 's15', 's16'],
-        show_mean=True,
-        ylabel="OD600 (absorbance)"
-    )
-    print(f"  ✓ Created {len(axes_od)} subplots")
-
-    # Plot GFP replicates
-    print("Plotting GFP replicates...")
-    fig_gfp, axes_gfp = frame.plot_replicate_time_series(
-        'GFP',
-        sample_ids=['s14', 's15', 's16'],
-        show_mean=True,
-        ylabel="GFP (a.u.)"
-    )
-    print(f"  ✓ Created {len(axes_gfp)} subplots")
-
-    plt.show()
-    print("✓ Single plate test completed")
+@pytest.fixture(autouse=True)
+def _seed_and_close():
+    """The synthetic plates add noise; seed it, and close every figure."""
+    np.random.seed(0)
+    yield
+    plt.close("all")
 
 
-def test_multi_plate_plotting():
-    """Test plotting replicates across multiple plates."""
-    print("\n" + "="*70)
-    print("TEST 2: Multi-Plate Replicate Plotting")
-    print("="*70)
+SAMPLES = ["s14", "s15", "s16"]
+CONCENTRATIONS = [0.1, 0.5, 1.0, 5.0]
+SUBPLOTS = {f"({s}, {c})" for s in SAMPLES for c in CONCENTRATIONS}
 
-    # Create multiple synthetic plates
-    plates = create_multi_plate_experiment(n_plates=2)
-    print(f"Created {len(plates)} synthetic plates")
 
-    # Create SampleFrame combining plates
-    frame = SampleFrame(plates)
-    print(f"\nCreated SampleFrame: {frame}")
-    print(f"Samples: {frame.get_sample_list()}")
+@pytest.mark.parametrize("measurement", ["OD600", "GFP"])
+def test_one_subplot_per_sample_and_concentration(measurement):
+    frame = SampleFrame(create_synthetic_plate())
 
-    # Inspect sample composition
-    print("\nSample composition:")
-    for sample_id in ['s14', 's15', 's16']:
-        sample = frame[sample_id]
-        n_wells = len(sample.wells)
-        # Group by concentration
-        conc_groups = {}
-        for well in sample.wells:
-            conc = well.concentration
-            if conc not in conc_groups:
-                conc_groups[conc] = []
-            conc_groups[conc].append(well)
-
-        print(f"  {sample_id}: {n_wells} total wells")
-        for conc, wells in sorted(conc_groups.items()):
-            print(f"    [{conc}]: {len(wells)} replicates (across {len(set(getattr(w, 'plate_id', 'unknown') for w in wells))} plates)")
-
-    # Plot with all samples
-    print("\nPlotting OD600 replicates across plates...")
     fig, axes = frame.plot_replicate_time_series(
-        'OD600',
-        sample_ids=['s14', 's15', 's16'],
-        show_mean=True,
-        ylabel="OD600 (absorbance)",
-        title="Multi-Plate Experiment - OD600 Replicates"
+        measurement, sample_ids=SAMPLES, show_mean=True
     )
-    print(f"  ✓ Created {len(axes)} subplots")
 
-    plt.show()
-    print("✓ Multi-plate test completed")
-
-
-def test_error_handling():
-    """Test error handling in the plotting function."""
-    print("\n" + "="*70)
-    print("TEST 3: Error Handling")
-    print("="*70)
-
-    plate = create_synthetic_plate()
-    frame = SampleFrame(plate)
-
-    # Test 1: Invalid measurement type
-    print("\n1. Testing error with invalid measurement type...")
-    try:
-        frame.plot_replicate_time_series('InvalidMeasurement', sample_ids=['s14'])
-        print("  ✗ Should have raised ValueError")
-    except ValueError as e:
-        print(f"  ✓ Correctly caught: {str(e)[:50]}...")
-
-    # Test 2: Invalid sample ID
-    print("\n2. Testing error with invalid sample ID...")
-    try:
-        frame.plot_replicate_time_series('OD600', sample_ids=['nonexistent_sample'])
-        print("  ✗ Should have raised ValueError")
-    except ValueError as e:
-        print(f"  ✓ Correctly caught: {str(e)[:50]}...")
-
-    # Test 3: Empty sample list
-    print("\n3. Testing error with empty sample list...")
-    try:
-        frame.plot_replicate_time_series('OD600', sample_ids=[])
-        print("  ✗ Should have raised ValueError")
-    except ValueError as e:
-        print(f"  ✓ Correctly caught: {str(e)[:50]}...")
-
-    print("\n✓ Error handling tests completed")
+    assert set(axes) == SUBPLOTS
+    for ax in axes.values():
+        # Three replicate traces plus the mean.
+        assert len(ax.get_lines()) == 4
 
 
-def test_plot_customization():
-    """Test customization options for plotting."""
-    print("\n" + "="*70)
-    print("TEST 4: Plot Customization Options")
-    print("="*70)
+def test_show_mean_adds_exactly_one_line():
+    frame = SampleFrame(create_synthetic_plate())
 
-    plate = create_synthetic_plate()
-    frame = SampleFrame(plate)
+    _, without = frame.plot_replicate_time_series(
+        "OD600", sample_ids=["s14"], show_mean=False
+    )
+    _, with_mean = frame.plot_replicate_time_series(
+        "OD600", sample_ids=["s14"], show_mean=True
+    )
 
-    # Test different figure sizes and options
-    print("\n1. Testing with custom figsize and no mean...")
-    fig1, _ = frame.plot_replicate_time_series(
-        'OD600',
-        sample_ids=['s14', 's15'],
-        show_mean=False,
+    for key in without:
+        assert len(with_mean[key].get_lines()) == len(without[key].get_lines()) + 1
+
+
+def test_replicates_from_every_plate_are_drawn():
+    frame = SampleFrame([create_synthetic_plate("P1"), create_synthetic_plate("P2")])
+
+    _, axes = frame.plot_replicate_time_series(
+        "OD600", sample_ids=SAMPLES, show_mean=False
+    )
+
+    for ax in axes.values():
+        # Three replicates on each of two plates.
+        assert len(ax.get_lines()) == 6
+
+
+def test_blanks_are_not_plotted_by_default():
+    frame = SampleFrame(create_synthetic_plate())
+
+    _, axes = frame.plot_replicate_time_series("OD600")
+
+    assert set(axes) == SUBPLOTS
+
+
+def test_figure_options_are_applied():
+    frame = SampleFrame(create_synthetic_plate())
+
+    fig, axes = frame.plot_replicate_time_series(
+        "GFP",
+        sample_ids=["s14"],
         figsize=(12, 8),
-        title="Only Replicates - No Mean"
-    )
-    print(f"  ✓ Custom figsize works")
-
-    print("\n2. Testing with custom labels...")
-    fig2, _ = frame.plot_replicate_time_series(
-        'GFP',
-        sample_ids=['s14', 's15', 's16'],
-        show_mean=True,
+        title="Only s14",
+        xlabel="Time (hours)",
         ylabel="Fluorescence (a.u.)",
-        xlabel="Time (hours)"
     )
-    print("  ✓ Custom labels work")
 
-    print("\n3. Testing with auto-calculated figsize...")
-    fig3, axes = frame.plot_replicate_time_series(
-        'OD600',
-        sample_ids=['s14', 's15', 's16'],
-        show_mean=True,
-        title="All Options - Auto Size"
-    )
-    print(f"  ✓ Auto figsize works")
-    print(f"  ✓ Returned {len(axes)} sample-concentration subplots")
-
-    plt.show()
-    print("\n✓ Customization tests completed")
-
-
-def main():
-    """Run all tests."""
-    print("\n" + "#"*70)
-    print("# SampleFrame Replicate Time Series Plotting - Test Suite")
-    print("#"*70)
-
-    # Set random seed for reproducibility
-    np.random.seed(42)
-
-    # Run tests
-    test_single_plate_plotting()
-    test_multi_plate_plotting()
-    test_error_handling()
-    test_plot_customization()
-
-    print("\n" + "#"*70)
-    print("# All Tests Completed Successfully!")
-    print("#"*70)
-
-
-if __name__ == "__main__":
-    main()
+    assert tuple(fig.get_size_inches()) == (12, 8)
+    assert fig._suptitle.get_text() == "Only s14"
+    ax = next(iter(axes.values()))
+    assert ax.get_xlabel() == "Time (hours)"
+    assert ax.get_ylabel() == "Fluorescence (a.u.)"

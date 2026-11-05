@@ -44,6 +44,7 @@ def _well(well_id="A1", row=0, col=0, **kwargs):
 # canonicalization
 # ---------------------------------------------------------------------------
 
+
 def test_default_role_is_sample():
     assert _well().role == ROLE_SAMPLE
 
@@ -53,7 +54,9 @@ def test_every_alias_canonicalizes(alias, expected):
     assert canonical_role(alias) == expected
 
 
-@pytest.mark.parametrize("spelling", ["NC", "nc", "Negative-Control", "negative control"])
+@pytest.mark.parametrize(
+    "spelling", ["NC", "nc", "Negative-Control", "negative control"]
+)
 def test_canonicalization_is_case_and_separator_insensitive(spelling):
     assert canonical_role(spelling) == ROLE_NEGATIVE_CONTROL
 
@@ -84,12 +87,13 @@ def test_aliases_all_point_at_valid_roles():
 # derived booleans
 # ---------------------------------------------------------------------------
 
+
 def test_negative_control_is_also_a_control():
     w = _well(role="negative_control")
 
     assert w.is_negative_control
     assert w.is_nc
-    assert w.is_control          # cannot disagree -- derived
+    assert w.is_control  # cannot disagree -- derived
     assert not w.is_positive_control
     assert not w.is_blank
 
@@ -128,6 +132,7 @@ def test_polarity_is_mutually_exclusive():
 # ---------------------------------------------------------------------------
 # write-through setters (existing callers assign these directly)
 # ---------------------------------------------------------------------------
+
 
 def test_is_blank_writes_through():
     w = _well()
@@ -187,6 +192,7 @@ def test_short_aliases_write_through():
 # set_sample_info
 # ---------------------------------------------------------------------------
 
+
 def test_set_sample_info_accepts_role():
     w = Well("A1", 0, 0)
     w.set_sample_info("s1", role="no_effect")
@@ -212,6 +218,7 @@ def test_legacy_flags_still_work():
 # ---------------------------------------------------------------------------
 # identity
 # ---------------------------------------------------------------------------
+
 
 def test_sample_type_is_an_alias_of_sample_name():
     w = Well("A1", 0, 0)
@@ -256,6 +263,7 @@ def test_sample_role_comes_from_its_wells():
 # ---------------------------------------------------------------------------
 # frame key and sample name agree
 # ---------------------------------------------------------------------------
+
 
 def _plate(name):
     p = Plate(plate_format="96", name=name)

@@ -1,10 +1,29 @@
 """
 Validation utilities for fluorescence assay data.
+
+Each validator returns True for a valid input and raises otherwise --
+``TypeError`` for the wrong kind of value, ``ValueError`` for a bad one.
 """
 
-import re
-from typing import Union, List, Tuple, Optional
+import numbers
+from collections import defaultdict
+from typing import List, Optional, Union
+
 import numpy as np
+
+from ..core.well import PLATE_DIMENSIONS, canonical_role, parse_well_id
+
+#: Well types accepted beyond the role vocabulary, kept for existing callers.
+_LEGACY_WELL_TYPES = frozenset({"standard", "reference"})
+
+
+def _require_number(value, what: str) -> float:
+    """``value`` as a float, raising TypeError for anything but a real number."""
+    # numbers.Real admits numpy scalars (np.int64 is not an int); bool is a
+    # subclass of int but never a meaningful amount.
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{what} must be a number, got {type(value).__name__}")
+    return float(value)
 
 
 def validate_well_position(position: str, plate_format: str = "96") -> bool:
@@ -14,69 +33,61 @@ def validate_well_position(position: str, plate_format: str = "96") -> bool:
     Parameters
     ----------
     position : str
-        Well position (e.g., "A1", "H12")
+        Well position (e.g., "A1", "H12", "AF48"); case-insensitive.
     plate_format : str, default "96"
         Plate format ("96", "384", "1536")
 
     Returns
     -------
     bool
-        True if valid, False otherwise
+        True if valid.
 
     Raises
     ------
     ValueError
-        If position is invalid
+        If the position is malformed, outside the plate, or the plate format
+        is unknown.
 
     Examples
     --------
     >>> validate_well_position("A1", "96")
     True
-    >>> validate_well_position("Z99", "96")
-    False
+    >>> validate_well_position("I1", "96")
+    Traceback (most recent call last):
+    ValueError: Row I out of range for 96-well plate
     """
     if not isinstance(position, str):
         raise ValueError("Well position must be a string")
+    if plate_format not in PLATE_DIMENSIONS:
+        raise ValueError(
+            f"Unknown plate format {plate_format!r}; "
+            f"expected one of {list(PLATE_DIMENSIONS)}"
+        )
 
-    # Check format using regex
-    pattern = r'^[A-Z]+\d+$'
-    if not re.match(pattern, position):
-        raise ValueError(f"Invalid well position format: {position}")
+    row, col = parse_well_id(position)  # raises ValueError on a bad form
+    max_rows, max_cols = PLATE_DIMENSIONS[plate_format]
+    letters = position.strip().rstrip("0123456789").upper()
 
-    # Extract row and column
-    row_letters = ''.join(c for c in position if c.isalpha())
-    col_digits = ''.join(c for c in position if c.isdigit())
-
-    if not row_letters or not col_digits:
-        raise ValueError(f"Invalid well position: {position}")
-
-    # Convert to indices
-    row_index = _letters_to_number(row_letters) - 1  # 0-indexed
-    col_index = int(col_digits) - 1  # 0-indexed
-
-    # Check bounds based on plate format
-    max_rows, max_cols = _get_plate_dimensions(plate_format)
-
-    if row_index < 0 or row_index >= max_rows:
-        raise ValueError(f"Row {row_letters} out of range for {plate_format}-well plate")
-
-    if col_index < 0 or col_index >= max_cols:
-        raise ValueError(f"Column {col_digits} out of range for {plate_format}-well plate")
-
+    if row >= max_rows:
+        raise ValueError(f"Row {letters} out of range for {plate_format}-well plate")
+    if col >= max_cols:
+        raise ValueError(f"Column {col + 1} out of range for {plate_format}-well plate")
     return True
 
 
-def validate_concentration(concentration: Union[float, int],
-                          min_value: float = 0.0,
-                          max_value: Optional[float] = None,
-                          allow_zero: bool = True) -> bool:
+def validate_concentration(
+    concentration: Union[float, int],
+    min_value: float = 0.0,
+    max_value: Optional[float] = None,
+    allow_zero: bool = True,
+) -> bool:
     """
     Validate concentration values.
 
     Parameters
     ----------
     concentration : float or int
-        Concentration value to validate
+        Concentration value to validate; numpy scalars are accepted.
     min_value : float, default 0.0
         Minimum allowed value
     max_value : float, optional
@@ -91,50 +102,50 @@ def validate_concentration(concentration: Union[float, int],
 
     Raises
     ------
+    TypeError
+        If it is not a number.
     ValueError
-        If concentration is invalid
+        If it is NaN, negative, zero when not allowed, or out of range.
 
     Examples
     --------
     >>> validate_concentration(10.5)
     True
     >>> validate_concentration(-1)
+    Traceback (most recent call last):
     ValueError: Concentration cannot be negative
     """
-    if not isinstance(concentration, (int, float)):
-        raise TypeError("Concentration must be a number")
+    value = _require_number(concentration, "Concentration")
 
-    if np.isnan(concentration):
+    if np.isnan(value):
         raise ValueError("Concentration cannot be NaN")
-
-    if concentration < 0:
+    if value < 0:
         raise ValueError("Concentration cannot be negative")
-
-    if not allow_zero and concentration == 0:
+    if not allow_zero and value == 0:
         raise ValueError("Zero concentration not allowed")
-
-    if concentration < min_value:
-        raise ValueError(f"Concentration {concentration} below minimum {min_value}")
-
-    if max_value is not None and concentration > max_value:
-        raise ValueError(f"Concentration {concentration} above maximum {max_value}")
-
+    if value < min_value:
+        raise ValueError(f"Concentration {value} below minimum {min_value}")
+    if max_value is not None and value > max_value:
+        raise ValueError(f"Concentration {value} above maximum {max_value}")
     return True
 
 
-def validate_fluorescence(fluorescence: Union[float, int, List[float]],
-                         min_value: float = 0.0,
-                         max_value: Optional[float] = None,
-                         allow_negative: bool = False) -> bool:
+def validate_fluorescence(
+    fluorescence: Union[float, int, List[float], np.ndarray],
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+    allow_negative: bool = False,
+) -> bool:
     """
     Validate fluorescence values.
 
     Parameters
     ----------
-    fluorescence : float, int, or list of float
-        Fluorescence value(s) to validate
-    min_value : float, default 0.0
-        Minimum allowed value
+    fluorescence : number, list or array
+        Value(s) to validate; arrays of any shape are checked element-wise.
+    min_value : float, optional
+        Minimum allowed value. Separate from ``allow_negative``: this used to
+        default to 0.0, so ``allow_negative=True`` still rejected negatives.
     max_value : float, optional
         Maximum allowed value
     allow_negative : bool, default False
@@ -147,8 +158,11 @@ def validate_fluorescence(fluorescence: Union[float, int, List[float]],
 
     Raises
     ------
+    TypeError
+        If a value is not a number.
     ValueError
-        If fluorescence is invalid
+        If a value is NaN, negative when not allowed, or out of range. For
+        several values the message gives the index of the first bad one.
 
     Examples
     --------
@@ -159,31 +173,25 @@ def validate_fluorescence(fluorescence: Union[float, int, List[float]],
     >>> validate_fluorescence(-50, allow_negative=True)
     True
     """
-    # Handle list/array input
     if isinstance(fluorescence, (list, tuple, np.ndarray)):
-        for i, value in enumerate(fluorescence):
+        flat = np.asarray(fluorescence, dtype=object).ravel()
+        for i, value in enumerate(flat):
             try:
                 validate_fluorescence(value, min_value, max_value, allow_negative)
             except ValueError as e:
-                raise ValueError(f"Invalid fluorescence at index {i}: {e}")
+                raise ValueError(f"Invalid fluorescence at index {i}: {e}") from e
         return True
 
-    # Single value validation
-    if not isinstance(fluorescence, (int, float)):
-        raise TypeError("Fluorescence must be a number or list of numbers")
+    value = _require_number(fluorescence, "Fluorescence")
 
-    if np.isnan(fluorescence):
+    if np.isnan(value):
         raise ValueError("Fluorescence cannot be NaN")
-
-    if not allow_negative and fluorescence < 0:
+    if not allow_negative and value < 0:
         raise ValueError("Fluorescence cannot be negative")
-
-    if fluorescence < min_value:
-        raise ValueError(f"Fluorescence {fluorescence} below minimum {min_value}")
-
-    if max_value is not None and fluorescence > max_value:
-        raise ValueError(f"Fluorescence {fluorescence} above maximum {max_value}")
-
+    if min_value is not None and value < min_value:
+        raise ValueError(f"Fluorescence {value} below minimum {min_value}")
+    if max_value is not None and value > max_value:
+        raise ValueError(f"Fluorescence {value} above maximum {max_value}")
     return True
 
 
@@ -194,7 +202,8 @@ def validate_plate_format(plate_format: str) -> bool:
     Parameters
     ----------
     plate_format : str
-        Plate format to validate
+        Plate format to validate. Use :func:`parse_plate_format` to also
+        accept an integer.
 
     Returns
     -------
@@ -203,36 +212,33 @@ def validate_plate_format(plate_format: str) -> bool:
 
     Raises
     ------
+    TypeError
+        If it is not a string.
     ValueError
-        If plate format is invalid
-
-    Examples
-    --------
-    >>> validate_plate_format("96")
-    True
-    >>> validate_plate_format("invalid")
-    ValueError: Unsupported plate format
+        If it is not a supported format.
     """
-    supported_formats = ["96", "384", "1536"]
-
     if not isinstance(plate_format, str):
         raise TypeError("Plate format must be a string")
-
-    if plate_format not in supported_formats:
-        raise ValueError(f"Unsupported plate format: {plate_format}. "
-                        f"Supported formats: {supported_formats}")
-
+    if plate_format not in PLATE_DIMENSIONS:
+        raise ValueError(
+            f"Unsupported plate format: {plate_format}. "
+            f"Supported formats: {list(PLATE_DIMENSIONS)}"
+        )
     return True
 
 
 def validate_well_type(well_type: str) -> bool:
     """
-    Validate well type specification.
+    Validate a well type: any well role or role alias, or a legacy type.
 
     Parameters
     ----------
     well_type : str
-        Well type to validate
+        A role (``'sample'``, ``'blank'``, ``'control'``,
+        ``'negative_control'``, ``'positive_control'``), an alias accepted by
+        :func:`fluoropy.core.well.canonical_role` (``'nc'``, ``'pc'``, ...),
+        or one of the older types ``'standard'`` and ``'reference'``.
+        Case-insensitive.
 
     Returns
     -------
@@ -241,57 +247,52 @@ def validate_well_type(well_type: str) -> bool:
 
     Raises
     ------
+    TypeError
+        If it is not a string.
     ValueError
-        If well type is invalid
-
-    Examples
-    --------
-    >>> validate_well_type("sample")
-    True
-    >>> validate_well_type("invalid")
-    ValueError: Invalid well type
+        If it is none of the above.
     """
-    valid_types = ["sample", "control", "blank", "standard", "reference"]
-
     if not isinstance(well_type, str):
         raise TypeError("Well type must be a string")
-
-    if well_type.lower() not in valid_types:
-        raise ValueError(f"Invalid well type: {well_type}. "
-                        f"Valid types: {valid_types}")
-
+    if well_type.strip().lower() in _LEGACY_WELL_TYPES:
+        return True
+    canonical_role(well_type)  # raises ValueError listing the valid roles
     return True
 
 
-# Helper functions
-def _letters_to_number(letters: str) -> int:
-    """Convert letters to number (A=1, B=2, ..., AA=27, etc.)."""
-    result = 0
-    for char in letters.upper():
-        result = result * 26 + (ord(char) - ord('A') + 1)
-    return result
-
-
-def _get_plate_dimensions(plate_format: str) -> Tuple[int, int]:
-    """Get plate dimensions (rows, cols) for given format."""
-    dimensions = {
-        "96": (8, 12),
-        "384": (16, 24),
-        "1536": (32, 48)
-    }
-    return dimensions[plate_format]
-
-
-def validate_data_consistency(wells: List, check_types: List[str] = None) -> bool:
+def validate_data_consistency(
+    wells: List,
+    check_types: Optional[List[str]] = None,
+    measurement: Optional[str] = None,
+    timepoint_idx: int = -1,
+    max_cv: float = 0.2,
+) -> bool:
     """
     Validate consistency across multiple wells.
 
     Parameters
     ----------
-    wells : list
-        List of Well objects to validate
+    wells : list of Well
+        Wells to validate. Wells with no sample are ignored by the
+        ``"types"`` and ``"concentrations"`` checks.
     check_types : list of str, optional
-        Types of consistency checks to perform
+        Any of ``"positions"``, ``"types"`` and ``"concentrations"``; all three
+        by default.
+
+        - ``"positions"``: no well position appears twice.
+        - ``"types"``: each control's replicates agree -- coefficient of
+          variation at most ``max_cv`` at ``timepoint_idx``. Each control
+          (sample name and concentration) is judged on its own: negative and
+          positive controls differ by design. Needs ``measurement``; skipped
+          without it.
+        - ``"concentrations"``: every well with a sample has a valid
+          concentration (see :func:`validate_concentration`).
+    measurement : str, optional
+        Measurement for the ``"types"`` check, e.g. ``"GFP"``.
+    timepoint_idx : int, default -1
+        Timepoint for the ``"types"`` check; the default is the last read.
+    max_cv : float, default 0.2
+        Largest acceptable coefficient of variation within a control.
 
     Returns
     -------
@@ -301,7 +302,7 @@ def validate_data_consistency(wells: List, check_types: List[str] = None) -> boo
     Raises
     ------
     ValueError
-        If data is inconsistent
+        Naming the wells or control that fail.
     """
     if not wells:
         return True
@@ -309,19 +310,49 @@ def validate_data_consistency(wells: List, check_types: List[str] = None) -> boo
     check_types = check_types or ["positions", "types", "concentrations"]
 
     if "positions" in check_types:
-        positions = [w.position for w in wells if w.position]
-        if len(positions) != len(set(positions)):
-            raise ValueError("Duplicate well positions found")
+        seen, duplicates = set(), set()
+        for well in wells:
+            if well.position in seen:
+                duplicates.add(well.position)
+            seen.add(well.position)
+        if duplicates:
+            raise ValueError(f"Duplicate well positions: {sorted(duplicates)}")
 
-    if "types" in check_types:
-        # Check that control wells have similar fluorescence
-        controls = [w for w in wells if w.well_type == "control"]
-        if len(controls) > 1:
-            fluorescence_values = [w.fluorescence for w in controls
-                                 if w.fluorescence is not None]
-            if fluorescence_values:
-                cv = np.std(fluorescence_values) / np.mean(fluorescence_values)
-                if cv > 0.2:  # 20% CV threshold
-                    raise ValueError(f"High variability in control wells (CV: {cv:.1%})")
+    if "types" in check_types and measurement is not None:
+        replicates = defaultdict(list)
+        for well in wells:
+            if not well.is_control or well.is_excluded():
+                continue
+            series = well.time_series.get(measurement)
+            if series is None or len(series) == 0:
+                continue
+            try:
+                value = float(np.asarray(series)[timepoint_idx])
+            except IndexError:
+                continue
+            if not np.isnan(value):
+                replicates[(well.sample_type, well.concentration)].append(value)
+
+        for (name, concentration), values in replicates.items():
+            if len(values) < 2:
+                continue
+            mean = np.mean(values)
+            if mean == 0:
+                continue
+            cv = np.std(values, ddof=1) / abs(mean)
+            if cv > max_cv:
+                raise ValueError(
+                    f"High variability in control {name} at {concentration} "
+                    f"(CV {cv:.1%} > {max_cv:.0%}, {measurement})"
+                )
+
+    if "concentrations" in check_types:
+        for well in wells:
+            if well.sample_type is None or well.concentration is None:
+                continue
+            try:
+                validate_concentration(well.concentration)
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"Well {well.position}: {e}") from e
 
     return True

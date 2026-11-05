@@ -83,6 +83,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`fluoropy.utils` additions.** `convert_units()` handles mass
+  concentrations (g/L, mg/mL, µg/mL, ng/mL, ...), converts between molar and
+  mass units given `molecular_weight`, and accepts µ, μ or u for micro.
+  `validate_well_type()` accepts the well roles and their aliases, as well as
+  `"standard"` and `"reference"`. `validate_data_consistency()` gains
+  `measurement`, `timepoint_idx` and `max_cv`. `Plate(plate_format=384)`
+  accepts an integer.
+- **Plate dimensions live in one place**, `fluoropy.core.well.PLATE_DIMENSIONS`,
+  used by `Plate` and the utils; the utils' own row-letter converters are gone
+  in favour of the well-ID helpers.
+- **Antibiotic layouts are amounts, by name.** `load_plate_layouts()` takes
+  `antibiotics_csv={'Kan': path}` like `inducer_csvs`, and gains
+  `modification_csvs`; `load_layout_csv(path, name, category=...)` loads one
+  into inducers, antibiotics or modifications. The old forms — a single
+  antibiotics path, or `load_layout_csv(path, 'antibiotics')` — stored cell
+  text where amounts belong and broke every later step; they now raise with
+  the new form.
+- **`Plate.get_plate_matrix()`** defaults to `"concentration"` and accepts a
+  measurement name with `timepoint_idx`. Its old default, `"fluorescence"`,
+  returned all NaN and now raises.
+- **`print_concentration_summary()` / `print_sample_summary()` print.** Since
+  the move to logging they showed nothing unless logging was configured.
+- **Fold change refuses to guess between controls.** When several samples
+  could be the reference — two negative controls, say, or two controls loaded
+  through `Plate(controls=[...])`, which carry no polarity —
+  `calculate_fold_change()` raises and names them. Set
+  `frame['S'].matched_control = 'NC'` to choose. It previously used whichever
+  came first.
+- **Code style is enforced.** black, isort and flake8 run in CI and in a
+  pre-commit hook, at pinned versions. See `CONTRIBUTING.md`.
 - **The library logs instead of printing.** 66 `print()` calls became
   `logger.info` (progress) and `logger.warning` (problems), so importing data no
   longer writes to stdout. Nothing is emitted unless you ask:
@@ -137,6 +167,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`fluoropy.utils` validators and converters** did not do what their
+  docstrings showed:
+  - `validate_data_consistency()` read `well.well_type` and
+    `well.fluorescence`, which no longer exist, so it raised `AttributeError`
+    on any wells. Its control check pooled negative and positive controls into
+    one CV, which they fail by design, and its `"concentrations"` check did
+    nothing. It now judges each control on its own for a given `measurement`,
+    and checks concentrations.
+  - `validate_fluorescence(-50, allow_negative=True)` — its own example —
+    raised, because `min_value` defaulted to 0. `min_value` is now optional.
+  - `validate_concentration()` / `validate_fluorescence()` rejected numpy
+    integers and accepted `True`.
+  - `validate_well_position()` rejected lower-case positions.
+  - `convert_units()` showed a µM-to-mg/mL example it could not do.
+  The docstring examples are now run by the test suite.
+- **Blank matching keyed on the first well's dose.** A sample takes its
+  condition dicts from its first well, so when the dose series was an inducer
+  or antibiotic, a sample whose first well carried a non-zero dose found no
+  blank under the default `match_inducers=True` and was left unblanked. A
+  dilution series starting at its highest dose — the README's own example —
+  hit this. Dose molecules are now left out of the matching key on both
+  sides, and a blank laid out at each dose is matched dose by dose.
+- **Empty layout cells became a sample named `'nan'`**, and empty amount
+  cells became NaN, which never matches anything. Empty cells now mean no
+  sample, or an amount of 0.
+- **`import_results()` could drop the last reads.** It sized arrays as
+  `int(run_time / sampling_rate)` — `int(0.7 / 0.1)` is 6 — and skipped any
+  row past that, including a read at t = 0. Every timed row is now kept.
+  The file is now closed after reading.
+- **`SampleFrame.summary()`** printed a literal `\n` instead of line breaks
+  and always reported one concentration.
+- **SEM over uneven replicate counts was too small.**
+  `calculate_data_source_statistics(error_type='sem')` divided by the padded
+  replicate count; it now counts the replicates present. This is the SEM for
+  blanked, normalized and fold-change data.
+- **Rows past Z** broke `Plate.to_dataframe()` and `plate[("AA", 0)]`.
+- **Tests that could not fail.** Several printed "SUCCESS" or "FAILURE", or
+  caught exceptions, and passed regardless. They now assert.
+- **Blank subtraction crashed on any plate with inducers or antibiotics.**
+  Matching keys called `tuple()` on each condition value, but wells store them
+  as plain floats — exactly what the layout loaders and
+  `set_sample_info(inducers=...)` produce — so
+  `calculate_blank_subtracted_timeseries()` and `calculate_fold_change()`
+  raised `TypeError: 'float' object is not iterable`.
+- **Per-plate matching used only a sample's first plate.** With
+  `pool_controls=False` (the default), a sample spanning plates had every
+  replicate blanked against, and compared with, references from the plate of
+  its first well. Each replicate now uses its own plate's blank, zero-dose
+  wells and control wells. A plate with no blank is reported and the sample
+  skipped, rather than blanked against another plate.
+- **Fold change had units when the control wasn't run at the dose.** That is
+  the usual case for a negative control, and `calculate_fold_change()` divided
+  `Sample_C / Sample_0` by the control's normalized zero-dose signal as well,
+  so results scaled with the control's brightness: a 3× induction came out as
+  0.0138. It is now `Sample_C / Sample_0`. Where the control *was* run at the
+  dose, it is still divided by `Control_C / Control_0`. **Fold-change values
+  computed before this fix are wrong wherever the control lacked the dose.**
+- **`align_replicates_by_od()` built inconsistent samples.** It assembled
+  them by hand, and:
+  - kept `sample.wells[r]` for each surviving replicate *index*, so a sample
+    with several doses kept only its first dose's wells;
+  - reset `negative_control` / `positive_control` to a bare `control`, and
+    left out the fold-change attributes;
+  - left the wells unaligned, so anything that re-read them —
+    `calculate_fold_change()`, blank subtraction — crashed on mismatched
+    lengths or used unaligned data;
+  - required every blank to be listed in `blanks=`, since blank wells never
+    reach an OD threshold.
+
+  Aligned samples are now built through `Sample()` from shifted copies of
+  their wells, and samples whose role is `blank` are treated as blanks
+  without being listed.
+- **`calculate_fold_change()` could take a positive control as the
+  reference**, and ignored `matched_control`. It took the first sample with
+  `is_control` set. It now uses `matched_control` when set, otherwise the one
+  negative control (or the one control of unspecified polarity), and raises if
+  several qualify. `keep_controls_separate` no longer matches a positive
+  control either.
 - **Well IDs past row Z were malformed.** Identifiers were built with
   `chr(ord('A') + row)` in thirteen places, which runs off the end of the
   alphabet: a 1536-well plate has 32 rows, so 288 of its wells were named
@@ -200,4 +308,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known issues
 
-None outstanding. The suite carries no `xfail` markers.
+None outstanding from the review.
+
+The suite carries no `xfail` markers.

@@ -12,9 +12,13 @@ from typing import Iterable, List, Optional, Tuple
 import numpy as np
 
 
-def well_values(plate, well_ids: Iterable[str], measurement: str,
-                timepoint_idx: int = -1,
-                skip_excluded: bool = True) -> Tuple[np.ndarray, List[str]]:
+def well_values(
+    plate,
+    well_ids: Iterable[str],
+    measurement: str,
+    timepoint_idx: int = -1,
+    skip_excluded: bool = True,
+) -> Tuple[np.ndarray, List[str]]:
     """
     Pull one value per well for ``measurement`` at ``timepoint_idx``.
 
@@ -103,8 +107,9 @@ def wells_with_role(plate, role: str, skip_excluded: bool = True) -> List[str]:
     ]
 
 
-def resolve_controls(plate, given: Optional[Iterable[str]], role: str,
-                     label: str) -> List[str]:
+def resolve_controls(
+    plate, given: Optional[Iterable[str]], role: str, label: str
+) -> List[str]:
     """
     Use explicitly supplied control wells, or fall back to the plate's roles.
 
@@ -133,10 +138,14 @@ def resolve_controls(plate, given: Optional[Iterable[str]], role: str,
     return found
 
 
-def all_well_values(plate, measurement: str, timepoint_idx: int = -1,
-                    skip_excluded: bool = True,
-                    exclude_blanks: bool = False,
-                    exclude_controls: bool = False) -> Tuple[np.ndarray, List[str]]:
+def all_well_values(
+    plate,
+    measurement: str,
+    timepoint_idx: int = -1,
+    skip_excluded: bool = True,
+    exclude_blanks: bool = False,
+    exclude_controls: bool = False,
+) -> Tuple[np.ndarray, List[str]]:
     """
     Same as :func:`well_values`, but over every well on the plate.
 

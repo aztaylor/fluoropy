@@ -6,9 +6,9 @@ Tests the new pool_controls parameter for blank/control matching at calculation 
 rather than the old keep_controls_separate parameter at initialization time.
 """
 
-import numpy as np
 import sys
 
+import numpy as np
 
 from fluoropy.core.plate import Plate
 from fluoropy.core.sampleframe import SampleFrame
@@ -24,21 +24,33 @@ def test_controls_always_merged():
     plate2 = Plate("96", name="plate2")
 
     # Plate 1: Add controls and blanks
-    plate1["A1"].set_sample_info(sample_type="NC", concentration=0.0, is_blank=False, is_control=True)
+    plate1["A1"].set_sample_info(
+        sample_type="NC", concentration=0.0, is_blank=False, is_control=True
+    )
     plate1["A1"].add_time_series("OD600", [5.0, 6.0, 7.0])
-    plate1["A2"].set_sample_info(sample_type="NC", concentration=0.0, is_blank=False, is_control=True)
+    plate1["A2"].set_sample_info(
+        sample_type="NC", concentration=0.0, is_blank=False, is_control=True
+    )
     plate1["A2"].add_time_series("OD600", [5.1, 6.1, 7.1])
 
-    plate1["B1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate1["B1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate1["B1"].add_time_series("OD600", [1.0, 1.0, 1.0])
 
     # Plate 2: Add controls and blanks
-    plate2["A1"].set_sample_info(sample_type="NC", concentration=0.0, is_blank=False, is_control=True)
+    plate2["A1"].set_sample_info(
+        sample_type="NC", concentration=0.0, is_blank=False, is_control=True
+    )
     plate2["A1"].add_time_series("OD600", [15.0, 16.0, 17.0])
-    plate2["A2"].set_sample_info(sample_type="NC", concentration=0.0, is_blank=False, is_control=True)
+    plate2["A2"].set_sample_info(
+        sample_type="NC", concentration=0.0, is_blank=False, is_control=True
+    )
     plate2["A2"].add_time_series("OD600", [15.1, 16.1, 17.1])
 
-    plate2["B1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate2["B1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate2["B1"].add_time_series("OD600", [2.0, 2.0, 2.0])
 
     # Create SampleFrame
@@ -47,22 +59,32 @@ def test_controls_always_merged():
     print(f"Samples created: {list(frame.keys())}")
 
     # Verify controls are merged
-    assert 'NC' in frame, "NC control should exist in frame"
-    assert 'NC_plate1' not in frame, "NC_plate1 should NOT exist (controls always merged)"
-    assert 'NC_plate2' not in frame, "NC_plate2 should NOT exist (controls always merged)"
+    assert "NC" in frame, "NC control should exist in frame"
+    assert (
+        "NC_plate1" not in frame
+    ), "NC_plate1 should NOT exist (controls always merged)"
+    assert (
+        "NC_plate2" not in frame
+    ), "NC_plate2 should NOT exist (controls always merged)"
 
-    nc_sample = frame['NC']
+    nc_sample = frame["NC"]
     print(f"NC sample has {len(nc_sample.wells)} wells from both plates")
-    assert len(nc_sample.wells) == 4, f"Expected 4 wells (2 from each plate), got {len(nc_sample.wells)}"
+    assert (
+        len(nc_sample.wells) == 4
+    ), f"Expected 4 wells (2 from each plate), got {len(nc_sample.wells)}"
 
     # Verify blanks are also merged
-    assert 'blank' in frame, "generic 'blank' should exist (blanks merged across plates)"
-    assert 'blank_plate1' not in frame, "blank_plate1 should NOT exist (blanks merged)"
-    assert 'blank_plate2' not in frame, "blank_plate2 should NOT exist (blanks merged)"
+    assert (
+        "blank" in frame
+    ), "generic 'blank' should exist (blanks merged across plates)"
+    assert "blank_plate1" not in frame, "blank_plate1 should NOT exist (blanks merged)"
+    assert "blank_plate2" not in frame, "blank_plate2 should NOT exist (blanks merged)"
 
-    blank_sample = frame['blank']
+    blank_sample = frame["blank"]
     print(f"blank sample has {len(blank_sample.wells)} wells from both plates")
-    assert len(blank_sample.wells) == 2, f"Expected 2 wells (1 from each plate), got {len(blank_sample.wells)}"
+    assert (
+        len(blank_sample.wells) == 2
+    ), f"Expected 2 wells (1 from each plate), got {len(blank_sample.wells)}"
 
     print("✅ SUCCESS: All samples (controls and blanks) merged across plates\n")
 
@@ -77,20 +99,28 @@ def test_per_plate_blank_matching():
     plate2 = Plate("96", name="plate2")
 
     # Plate 1: Sample + Blank
-    plate1["A1"].set_sample_info(sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False)
+    plate1["A1"].set_sample_info(
+        sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False
+    )
     plate1["A1"].add_time_series("OD600", [10.0, 11.0, 12.0])
     plate1["A1"].medium = "LB"
 
-    plate1["B1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate1["B1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate1["B1"].add_time_series("OD600", [1.0, 1.0, 1.0])  # Blank value = 1.0
     plate1["B1"].medium = "LB"
 
     # Plate 2: Sample + Blank (different blank value!)
-    plate2["A1"].set_sample_info(sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False)
+    plate2["A1"].set_sample_info(
+        sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False
+    )
     plate2["A1"].add_time_series("OD600", [20.0, 21.0, 22.0])
     plate2["A1"].medium = "LB"
 
-    plate2["B1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate2["B1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate2["B1"].add_time_series("OD600", [2.0, 2.0, 2.0])  # Blank value = 2.0
     plate2["B1"].medium = "LB"
 
@@ -99,22 +129,30 @@ def test_per_plate_blank_matching():
     frame.calculate_blank_subtracted_timeseries(pool_controls=False)
 
     # Check sample_A (from plate1) was blanked with plate1's blank (1.0)
-    sample_a = frame['sample_A']
-    blanked_od = sample_a.blanked_data['OD600']
-    expected_a = np.array([10.0 - 1.0, 11.0 - 1.0, 12.0 - 1.0])  # Should use plate1 blank
+    sample_a = frame["sample_A"]
+    blanked_od = sample_a.blanked_data["OD600"]
+    expected_a = np.array(
+        [10.0 - 1.0, 11.0 - 1.0, 12.0 - 1.0]
+    )  # Should use plate1 blank
 
     print(f"sample_A blanked OD600: {blanked_od[:, 0, 0]}")
     print(f"Expected (using plate1 blank=1.0): {expected_a}")
-    assert np.allclose(blanked_od[:, 0, 0], expected_a), "sample_A should use plate1 blank"
+    assert np.allclose(
+        blanked_od[:, 0, 0], expected_a
+    ), "sample_A should use plate1 blank"
 
     # Check sample_B (from plate2) was blanked with plate2's blank (2.0)
-    sample_b = frame['sample_B']
-    blanked_od = sample_b.blanked_data['OD600']
-    expected_b = np.array([20.0 - 2.0, 21.0 - 2.0, 22.0 - 2.0])  # Should use plate2 blank
+    sample_b = frame["sample_B"]
+    blanked_od = sample_b.blanked_data["OD600"]
+    expected_b = np.array(
+        [20.0 - 2.0, 21.0 - 2.0, 22.0 - 2.0]
+    )  # Should use plate2 blank
 
     print(f"sample_B blanked OD600: {blanked_od[:, 0, 0]}")
     print(f"Expected (using plate2 blank=2.0): {expected_b}")
-    assert np.allclose(blanked_od[:, 0, 0], expected_b), "sample_B should use plate2 blank"
+    assert np.allclose(
+        blanked_od[:, 0, 0], expected_b
+    ), "sample_B should use plate2 blank"
 
     print("✅ SUCCESS: Per-plate blank matching works correctly\n")
 
@@ -129,16 +167,22 @@ def test_pooled_blank_matching():
     plate2 = Plate("96", name="plate2")
 
     # Plate 1: Sample + Blank
-    plate1["A1"].set_sample_info(sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False)
+    plate1["A1"].set_sample_info(
+        sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False
+    )
     plate1["A1"].add_time_series("OD600", [10.0, 11.0, 12.0])
     plate1["A1"].medium = "LB"
 
-    plate1["B1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate1["B1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate1["B1"].add_time_series("OD600", [1.0, 1.0, 1.0])
     plate1["B1"].medium = "LB"
 
     # Plate 2: Sample only (no blank on this plate)
-    plate2["A1"].set_sample_info(sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False)
+    plate2["A1"].set_sample_info(
+        sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False
+    )
     plate2["A1"].add_time_series("OD600", [20.0, 21.0, 22.0])
     plate2["A1"].medium = "LB"
 
@@ -147,13 +191,17 @@ def test_pooled_blank_matching():
     frame.calculate_blank_subtracted_timeseries(pool_controls=True)
 
     # With pool_controls=True, sample_B should use the blank from plate1
-    sample_b = frame['sample_B']
-    blanked_od = sample_b.blanked_data['OD600']
-    expected_b = np.array([20.0 - 1.0, 21.0 - 1.0, 22.0 - 1.0])  # Should use plate1 blank
+    sample_b = frame["sample_B"]
+    blanked_od = sample_b.blanked_data["OD600"]
+    expected_b = np.array(
+        [20.0 - 1.0, 21.0 - 1.0, 22.0 - 1.0]
+    )  # Should use plate1 blank
 
     print(f"sample_B blanked OD600: {blanked_od[:, 0, 0]}")
     print(f"Expected (using pooled blank from plate1=1.0): {expected_b}")
-    assert np.allclose(blanked_od[:, 0, 0], expected_b), "sample_B should use pooled blank from plate1"
+    assert np.allclose(
+        blanked_od[:, 0, 0], expected_b
+    ), "sample_B should use pooled blank from plate1"
 
     print("✅ SUCCESS: Pooled blank matching works correctly\n")
 
@@ -168,40 +216,54 @@ def test_pooled_control_matching():
     plate2 = Plate("96", name="plate2")
 
     # Plate 1: Sample + Control + Blank
-    plate1["A1"].set_sample_info(sample_type="sample_A", concentration=1.0, is_blank=False, is_control=False)
+    plate1["A1"].set_sample_info(
+        sample_type="sample_A", concentration=1.0, is_blank=False, is_control=False
+    )
     plate1["A1"].add_time_series("GFP", [100.0, 110.0])
     plate1["A1"].add_time_series("OD600", [0.5, 0.6])
     plate1["A1"].medium = "LB"
 
     # Fold change is expressed relative to each sample's own zero-concentration
     # wells, so every sample needs one.
-    plate1["A2"].set_sample_info(sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False)
+    plate1["A2"].set_sample_info(
+        sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False
+    )
     plate1["A2"].add_time_series("GFP", [80.0, 85.0])
     plate1["A2"].add_time_series("OD600", [0.5, 0.6])
     plate1["A2"].medium = "LB"
 
-    plate1["B1"].set_sample_info(sample_type="NC", concentration=0.0, is_blank=False, is_control=True)
+    plate1["B1"].set_sample_info(
+        sample_type="NC", concentration=0.0, is_blank=False, is_control=True
+    )
     plate1["B1"].add_time_series("GFP", [50.0, 55.0])
     plate1["B1"].add_time_series("OD600", [0.5, 0.6])
     plate1["B1"].medium = "LB"
 
-    plate1["C1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate1["C1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate1["C1"].add_time_series("GFP", [5.0, 5.0])
     plate1["C1"].add_time_series("OD600", [0.05, 0.05])
     plate1["C1"].medium = "LB"
 
     # Plate 2: Sample only (no control on this plate)
-    plate2["A1"].set_sample_info(sample_type="sample_B", concentration=1.0, is_blank=False, is_control=False)
+    plate2["A1"].set_sample_info(
+        sample_type="sample_B", concentration=1.0, is_blank=False, is_control=False
+    )
     plate2["A1"].add_time_series("GFP", [150.0, 160.0])
     plate2["A1"].add_time_series("OD600", [0.5, 0.6])
     plate2["A1"].medium = "LB"
 
-    plate2["A2"].set_sample_info(sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False)
+    plate2["A2"].set_sample_info(
+        sample_type="sample_B", concentration=0.0, is_blank=False, is_control=False
+    )
     plate2["A2"].add_time_series("GFP", [120.0, 130.0])
     plate2["A2"].add_time_series("OD600", [0.5, 0.6])
     plate2["A2"].medium = "LB"
 
-    plate2["C1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate2["C1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate2["C1"].add_time_series("GFP", [5.0, 5.0])
     plate2["C1"].add_time_series("OD600", [0.05, 0.05])
     plate2["C1"].medium = "LB"
@@ -214,7 +276,7 @@ def test_pooled_control_matching():
     frame.calculate_fold_change("GFP", pool_controls=False)
 
     # sample_A should have fold_change (has control on same plate)
-    assert hasattr(frame['sample_A'], 'fold_change'), "sample_A should have fold_change"
+    assert hasattr(frame["sample_A"], "fold_change"), "sample_A should have fold_change"
     print("  sample_A has fold_change (control on same plate)")
 
     # sample_B should NOT have fold_change (no control on same plate)
@@ -226,8 +288,8 @@ def test_pooled_control_matching():
     frame.calculate_fold_change("GFP", pool_controls=True)
 
     # Both samples should now have fold_change
-    assert hasattr(frame['sample_A'], 'fold_change'), "sample_A should have fold_change"
-    assert hasattr(frame['sample_B'], 'fold_change'), "sample_B should have fold_change"
+    assert hasattr(frame["sample_A"], "fold_change"), "sample_A should have fold_change"
+    assert hasattr(frame["sample_B"], "fold_change"), "sample_B should have fold_change"
     print("  Both sample_A and sample_B have fold_change (using pooled control)")
 
     print("✅ SUCCESS: Pooled control matching in fold_change works correctly\n")
@@ -241,12 +303,16 @@ def test_missing_blank_warning():
     plate1 = Plate("96", name="plate1")
 
     # Sample with medium="LB"
-    plate1["A1"].set_sample_info(sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False)
+    plate1["A1"].set_sample_info(
+        sample_type="sample_A", concentration=0.0, is_blank=False, is_control=False
+    )
     plate1["A1"].add_time_series("OD600", [10.0, 11.0, 12.0])
     plate1["A1"].medium = "LB"
 
     # Blank with different medium="M9" (won't match!)
-    plate1["B1"].set_sample_info(sample_type="blank", concentration=0.0, is_blank=True, is_control=False)
+    plate1["B1"].set_sample_info(
+        sample_type="blank", concentration=0.0, is_blank=True, is_control=False
+    )
     plate1["B1"].add_time_series("OD600", [1.0, 1.0, 1.0])
     plate1["B1"].medium = "M9"
 
@@ -257,11 +323,10 @@ def test_missing_blank_warning():
     frame.calculate_blank_subtracted_timeseries(pool_controls=False)
 
     # sample_A should NOT have blanked_data because no matching blank
-    sample_a = frame['sample_A']
-    if 'OD600' in sample_a.blanked_data:
-        print("❌ FAILURE: sample_A should not have blanked_data (no matching blank)")
-    else:
-        print("✅ SUCCESS: Warning correctly shown for missing blank\n")
+    sample_a = frame["sample_A"]
+    assert (
+        "OD600" not in sample_a.blanked_data
+    ), "sample_A should not have blanked_data (no matching blank)"
 
 
 def run_all_tests():
@@ -290,6 +355,7 @@ def run_all_tests():
     except Exception as e:
         print(f"\n❌ UNEXPECTED ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         print("=" * 60)
         return False

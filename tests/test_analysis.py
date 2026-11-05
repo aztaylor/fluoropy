@@ -22,8 +22,7 @@ from fluoropy.core.plate import Plate
 TIMES = np.array([0.0, 1.0, 2.0])
 
 
-def _set(plate, well_id, series, sample_type="s1", is_blank=False,
-         is_control=False):
+def _set(plate, well_id, series, sample_type="s1", is_blank=False, is_control=False):
     well = plate[well_id]
     well.sample_type = sample_type
     well.is_blank = is_blank
@@ -46,6 +45,7 @@ def plate():
 # ---------------------------------------------------------------------------
 # extraction helper
 # ---------------------------------------------------------------------------
+
 
 def test_well_values_reads_endpoint_by_default(plate):
     values, ids = well_values(plate, ["A1", "A2"], "GFP")
@@ -79,6 +79,7 @@ def test_all_well_values_ignores_unassigned_wells(plate):
 # ---------------------------------------------------------------------------
 # Z'-factor
 # ---------------------------------------------------------------------------
+
 
 def test_z_factor_is_one_for_zero_variance_controls(plate):
     # sigma_p = sigma_n = 0, so Z' = 1 - 0 = 1 exactly.
@@ -129,6 +130,7 @@ def test_z_factor_infinite_when_means_coincide():
 # signal to noise
 # ---------------------------------------------------------------------------
 
+
 def test_signal_to_noise_hand_calculated():
     p = Plate(plate_format="96", name="sn")
     for wid in ("A1", "A2"):
@@ -158,6 +160,7 @@ def test_signal_to_noise_requires_two_background_wells(plate):
 # ---------------------------------------------------------------------------
 # edge effects
 # ---------------------------------------------------------------------------
+
 
 def test_edge_effects_detected():
     p = Plate(plate_format="96", name="edge")
@@ -224,10 +227,11 @@ def test_edge_effects_last_row_and_column_count_as_edge():
 # normalize to controls
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_to_controls_anchors_at_zero_and_hundred(plate):
-    _set(plate, "C1", [0.0, 0.0, 10.0])   # equals negative control
+    _set(plate, "C1", [0.0, 0.0, 10.0])  # equals negative control
     _set(plate, "C2", [0.0, 0.0, 100.0])  # equals positive control
-    _set(plate, "C3", [0.0, 0.0, 55.0])   # midpoint
+    _set(plate, "C3", [0.0, 0.0, 55.0])  # midpoint
 
     result = normalize_to_controls(
         plate, "GFP", ["C1", "C2", "C3"], ["A1", "A2", "A3"], ["B1", "B2", "B3"]
@@ -259,14 +263,13 @@ def test_normalize_to_controls_rejects_zero_window():
 # percent inhibition
 # ---------------------------------------------------------------------------
 
+
 def test_percent_inhibition_hand_calculated(plate):
     _set(plate, "C1", [0.0, 0.0, 100.0])  # no inhibition
-    _set(plate, "C2", [0.0, 0.0, 50.0])   # half
-    _set(plate, "C3", [0.0, 0.0, 0.0])    # complete
+    _set(plate, "C2", [0.0, 0.0, 50.0])  # half
+    _set(plate, "C3", [0.0, 0.0, 0.0])  # complete
 
-    result = percent_inhibition(
-        plate, "GFP", ["C1", "C2", "C3"], ["A1", "A2", "A3"]
-    )
+    result = percent_inhibition(plate, "GFP", ["C1", "C2", "C3"], ["A1", "A2", "A3"])
     assert result["C1"] == pytest.approx(0.0)
     assert result["C2"] == pytest.approx(50.0)
     assert result["C3"] == pytest.approx(100.0)
@@ -293,10 +296,10 @@ def test_percent_inhibition_rejects_zero_control():
 # robust z-score
 # ---------------------------------------------------------------------------
 
+
 def test_robust_z_score_centres_on_median():
     p = Plate(plate_format="96", name="rz")
-    for wid, v in zip(("A1", "A2", "A3", "A4", "A5"),
-                      (10.0, 20.0, 30.0, 40.0, 50.0)):
+    for wid, v in zip(("A1", "A2", "A3", "A4", "A5"), (10.0, 20.0, 30.0, 40.0, 50.0)):
         _set(p, wid, [0.0, 0.0, v])
 
     result = robust_z_score(p, "GFP")

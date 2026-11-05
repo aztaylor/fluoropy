@@ -1,0 +1,18 @@
+# Install once with `pre-commit install`; hooks then run on every commit.
+# Versions are pinned so local runs and CI agree. Bump them together with
+# the matching pins in .github/workflows/ci.yml.
+repos:
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.5.1
+    hooks:
+      - id: black
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 9.0.2
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.4.1
+    hooks:
+      - id: flake8
