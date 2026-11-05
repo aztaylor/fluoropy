@@ -345,6 +345,7 @@ class Well:
 
     @property
     def is_blank(self) -> bool:
+        """True when this well holds medium only, for background subtraction."""
         return self.role == ROLE_BLANK
 
     @is_blank.setter
@@ -389,6 +390,7 @@ class Well:
     # Short aliases, matching how plates get talked about at the bench.
     @property
     def is_nc(self) -> bool:
+        """Short alias of :attr:`is_negative_control`."""
         return self.is_negative_control
 
     @is_nc.setter
@@ -397,6 +399,7 @@ class Well:
 
     @property
     def is_pc(self) -> bool:
+        """Short alias of :attr:`is_positive_control`."""
         return self.is_positive_control
 
     @is_pc.setter

@@ -314,6 +314,7 @@ class Sample:
 
     @property
     def is_blank(self) -> bool:
+        """True when this sample is medium only, for background subtraction."""
         return self.role == ROLE_BLANK
 
     @is_blank.setter
@@ -322,6 +323,7 @@ class Sample:
 
     @property
     def is_control(self) -> bool:
+        """True for any control, whatever its polarity."""
         return self.role in CONTROL_ROLES
 
     @is_control.setter
@@ -332,6 +334,7 @@ class Sample:
 
     @property
     def is_negative_control(self) -> bool:
+        """The no-effect reference. Says nothing about signal direction."""
         return self.role == ROLE_NEGATIVE_CONTROL
 
     @is_negative_control.setter
@@ -342,6 +345,7 @@ class Sample:
 
     @property
     def is_positive_control(self) -> bool:
+        """The maximal-effect reference. Says nothing about signal direction."""
         return self.role == ROLE_POSITIVE_CONTROL
 
     @is_positive_control.setter
@@ -352,6 +356,7 @@ class Sample:
 
     @property
     def is_nc(self) -> bool:
+        """Short alias of :attr:`is_negative_control`."""
         return self.is_negative_control
 
     @is_nc.setter
@@ -360,6 +365,7 @@ class Sample:
 
     @property
     def is_pc(self) -> bool:
+        """Short alias of :attr:`is_positive_control`."""
         return self.is_positive_control
 
     @is_pc.setter
