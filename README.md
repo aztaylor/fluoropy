@@ -217,6 +217,7 @@ plate.load_layout_csv("layouts/carb.csv", "Carb", category="antibiotic")
 
 ## Documentation
 
+- [MANUAL.md](MANUAL.md) — the full tour: every public function, with runnable examples
 - [ARCHITECTURE.md](ARCHITECTURE.md) — what lives where, and why
 - [CHANGELOG.md](CHANGELOG.md) — including known issues and migration notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — setup and the checks CI runs
